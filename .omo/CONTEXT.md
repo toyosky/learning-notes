@@ -1,19 +1,26 @@
 # Project Context
 
-## Remote Repository
-- Platform: Gitee
-- Remote URL: https://gitee.com/yin_river/learning-notes.git
+## Remote Repositories
+- **Primary**: GitHub (SSH) — `git@github.com:toyosky/learning-notes.git`
+- **Mirror**: Gitee (HTTPS) — `https://gitee.com/yin_river/learning-notes.git`
 - Git User: chenyou <1291929850@qq.com>
 - Branch: main
-- Auth: Git credential store (`~/.git-credentials`)
+
+## Authentication
+- GitHub: SSH key (`~/.ssh/github_ed25519`)
+- Gitee: Credential store (`~/.git-credentials`)
 
 ## Workflow
 ```bash
-# 提交笔记
+# 提交笔记（默认推送到 GitHub）
 git add -A && git commit -m "描述修改内容"
-git push
+git push github main
 
-# 新增笔记后，记得更新 0-索引/学习路线图.md 中的链接
+# 同时同步到 Gitee 备份
+git push origin main
+
+# 首次在本地电脑克隆
+git clone git@github.com:toyosky/learning-notes.git
 ```
 
 ## Notes
