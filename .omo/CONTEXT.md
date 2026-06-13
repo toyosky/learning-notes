@@ -10,20 +10,33 @@
 - GitHub: SSH key (`~/.ssh/github_ed25519`)
 - Gitee: Credential store (`~/.git-credentials`)
 
+## Directory Structure (English filenames, Chinese content)
+```
+0-index/roadmap.md                — 学习路线图（MOC）
+1-ai-learning/
+  1.1-transformer-internals.md   — 大模型内部结构
+  1.2-llm-to-vlm.md             — 多模态大模型入门
+  1.3-lora-intro.md             — LoRA 微调入门
+  1.4-lora-math.md              — LoRA 数学原理
+  1.5-vlm-driving-analysis.md   — VLM-Driving 项目分析
+2-quant-trading/
+  2.1-data-akshare.md           — 数据获取基础
+  2.2-dca-backtest.md           — 简单定投回测
+  2.3-ma-crossover-oxq.md       — 均线交叉策略回测
+  strategy-comparison.png       — 策略对比图
+```
+
 ## Workflow
 ```bash
-# 提交笔记（默认推送到 GitHub）
+# 提交笔记
 git add -A && git commit -m "描述修改内容"
-git push github main
+git push github main     # 推 GitHub
+git push origin main     # 同步 Gitee
 
-# 同时同步到 Gitee 备份
-git push origin main
-
-# 首次在本地电脑克隆
-git clone git@github.com:toyosky/learning-notes.git
+# 新增笔记后，记得更新 0-index/roadmap.md 中的链接
 ```
 
 ## Notes
-- This vault is an Obsidian notebook covering AI/ML and quantitative trading
+- 文件名使用纯英文，避免 GitHub App 中文编码问题
+- 文件内容保持中文标题和正文
 - Do NOT commit large binary files (>50 MB) to the repo
-- `.obsidian/` and `.hermes/` directories are part of the vault

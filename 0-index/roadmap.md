@@ -12,15 +12,15 @@ date: 2026-06-13
 > 从 Transformer 结构到 VLM 实战，系统理解大模型
 
 ### 基础篇
-- [[1.1-大模型内部结构]] — Transformer 架构、Attention 和 FFN、参数量分布
-- [[1.2-多模态大模型入门]] — 从 LLM 到 VLM、CLIP、主流模型对比
+- [[1.1-transformer-internals]] — Transformer 架构、Attention 和 FFN、参数量分布
+- [[1.2-llm-to-vlm]] — 从 LLM 到 VLM、CLIP、主流模型对比
 
 ### 微调篇
-- [[1.3-LoRA微调入门]] — LoRA 核心概念、超参数选择、PEFT 实战
-- [[1.4-LoRA数学原理]] — 为什么低秩、SVD 视角、理论解释
+- [[1.3-lora-intro]] — LoRA 核心概念、超参数选择、PEFT 实战
+- [[1.4-lora-math]] — 为什么低秩、SVD 视角、理论解释
 
 ### 实战篇
-- [[1.5-VLM-Driving项目分析]] — VLM 在自动驾驶场景的微调实战
+- [[1.5-vlm-driving-analysis]] — VLM 在自动驾驶场景的微调实战
 
 ### 推荐学习路径
 ```
@@ -36,11 +36,11 @@ date: 2026-06-13
 > 从数据获取到策略回测，从小白到入门
 
 ### 基础篇
-- [[2.1-数据获取基础-akshare]] — 使用 akshare 获取 A 股 / ETF 数据
+- [[2.1-data-akshare]] — 使用 akshare 获取 A 股 / ETF 数据
 
 ### 回测篇
-- [[2.2-简单定投回测-DCA]] — DCA 定投 + 均线择时回测
-- [[2.3-均线交叉策略回测-oxq]] — 使用 open-xquant 框架做策略回测
+- [[2.2-dca-backtest]] — DCA 定投 + 均线择时回测
+- [[2.3-ma-crossover-oxq]] — 使用 open-xquant 框架做策略回测
 
 ### 推荐学习路径
 ```
