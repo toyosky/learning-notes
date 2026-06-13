@@ -100,7 +100,7 @@ def dca_ma_strategy(data: pd.DataFrame,
 
 ### 策略对比图
 
-![策略对比图](../assets/strategy-comparison.png)
+![策略对比图](../../assets/strategy-comparison.png)
 
 ### 结果解读
 

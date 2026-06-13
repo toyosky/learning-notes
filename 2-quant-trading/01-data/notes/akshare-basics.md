@@ -62,7 +62,7 @@ Date
 
 ### 股价走势图
 
-![510300股价走势](../assets/stock-price-510300.png)
+![510300股价走势](../../assets/stock-price-510300.png)
 
 ## 参数对照
 

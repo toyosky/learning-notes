@@ -73,7 +73,7 @@ for symbol in SYMBOLS:
 
 ### 策略收益对比
 
-![oxq策略收益对比](../assets/oxq-returns.png)
+![oxq策略收益对比](../../assets/oxq-returns.png)
 
 ### 关键发现
 
@@ -91,7 +91,7 @@ SMA(1) 等价于当日收盘价，Crossover(1, 20) 实际上是**价格突破均
 
 ### 均线信号示意
 
-![均线信号](../assets/ma-signals-510300.png)
+![均线信号](../../assets/ma-signals-510300.png)
 
 ## 数据下载
 
