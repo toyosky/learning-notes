@@ -125,5 +125,5 @@ ak.fund_etf_hist_em(symbol="510300", adjust="qfq")
 
 ## 相关笔记
 
-- [[../01-数据获取/akshare-basics]] — akshare 数据获取
+- [[../../01-data/notes/akshare-basics|akshare 数据获取]] — akshare 数据获取
 - [[dca-backtest]] — 传统 DCA 定投策略

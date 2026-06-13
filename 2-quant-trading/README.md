@@ -9,21 +9,38 @@ date: 2026-06-13
 
 ---
 
-## 目录
+## 目录结构
 
-### 01-数据获取
+```
+2-quant-trading/
+├── 01-data/                # 数据获取
+│   ├── notes/              # 笔记
+│   ├── deep/               # 深挖概念
+│   └── code/               # 代码
+├── 02-backtest/            # 策略回测
+│   ├── notes/              # 笔记
+│   ├── deep/               # 深挖概念
+│   └── code/               # 代码
+└── assets/                 # 图片资源
+```
+
+---
+
+## 笔记索引
+
+### 01-data（数据获取）
 
 | 笔记 | 内容 |
 |------|------|
-| [[01-数据获取/akshare-basics\|akshare 数据获取]] | 用 akshare 替代 yfinance 获取 A 股/ETF 数据 |
-| [[01-数据获取/前复权vs后复权\|前复权 vs 后复权]] | 复权概念深挖，对回测收益率的影响 |
+| [[01-data/notes/akshare-basics\|akshare 数据获取]] | 用 akshare 替代 yfinance 获取 A 股/ETF 数据 |
+| [[01-data/deep/forward-vs-backward-adjustment\|前复权 vs 后复权]] | 复权概念深挖，对回测收益率的影响 |
 
-### 02-策略回测
+### 02-backtest（策略回测）
 
 | 笔记 | 内容 |
 |------|------|
-| [[02-策略回测/dca-backtest\|DCA 定投回测]] | 定投 + 均线择时策略回测 |
-| [[02-策略回测/ma-crossover-oxq\|oxq 均线交叉策略]] | 用 open-xquant 框架做 SMA 交叉策略回测 |
+| [[02-backtest/notes/dca-backtest\|DCA 定投回测]] | 定投 + 均线择时策略回测 |
+| [[02-backtest/notes/ma-crossover-oxq\|oxq 均线交叉策略]] | 用 open-xquant 框架做 SMA 交叉策略回测 |
 
 ---
 
@@ -43,11 +60,11 @@ akshare     DCA定投      oxq框架
 
 | 文件 | 位置 |
 |------|------|
-| `data_fetcher.py` | 01-数据获取/ |
-| `dca_backtest.py` | 02-策略回测/ |
-| `ma_strategy.py` | 02-策略回测/ |
-| `etf_comparison.py` | 02-策略回测/ |
-| `generate_charts.py` | 02-策略回测/ |
+| `data_fetcher.py` | 01-data/code/ |
+| `dca_backtest.py` | 02-backtest/code/ |
+| `ma_strategy.py` | 02-backtest/code/ |
+| `etf_comparison.py` | 02-backtest/code/ |
+| `generate_charts.py` | 02-backtest/code/ |
 
 ---
 

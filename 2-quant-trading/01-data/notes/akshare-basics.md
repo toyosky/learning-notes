@@ -110,10 +110,10 @@ ak.stock_zh_a_spot_em()
 
 > 🕳️ 遇到不熟悉的概念了？点进去深挖。
 
-- [[前复权vs后复权]] — 前复权和后复权的区别、计算方式，以及对量化回测的影响
+- [[../deep/forward-vs-backward-adjustment|前复权vs后复权]] — 前复权和后复权的区别、计算方式，以及对量化回测的影响
 - 还想深挖？→ 分红除息的税费计算细则
 
 ## 相关笔记
 
-- [[../02-策略回测/dca-backtest]] — 基于本数据的 DCA 回测
-- [[../02-策略回测/ma-crossover-oxq]] — 基于 oxq 框架的策略回测
+- [[../../02-backtest/notes/dca-backtest|DCA 定投回测]] — 基于本数据的 DCA 回测
+- [[../../02-backtest/notes/ma-crossover-oxq|oxq 均线交叉策略]] — 基于 oxq 框架的策略回测

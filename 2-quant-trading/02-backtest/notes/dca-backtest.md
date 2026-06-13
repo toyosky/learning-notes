@@ -129,5 +129,5 @@ monthly_last  = data.resample('ME').last()   # 每月最后一个交易日
 
 ## 相关笔记
 
-- [[../01-数据获取/akshare-basics]] — 使用 akshare 获取数据
+- [[../../01-data/notes/akshare-basics|akshare 数据获取]] — 使用 akshare 获取数据
 - [[ma-crossover-oxq]] — 使用 oxq 框架做策略回测
