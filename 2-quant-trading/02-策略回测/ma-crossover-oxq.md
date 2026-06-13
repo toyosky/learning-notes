@@ -73,7 +73,7 @@ for symbol in SYMBOLS:
 
 ### 策略收益对比
 
-![oxq策略收益对比](oxq-returns.png)
+![oxq策略收益对比](../assets/oxq-returns.png)
 
 ### 关键发现
 
@@ -91,7 +91,7 @@ SMA(1) 等价于当日收盘价，Crossover(1, 20) 实际上是**价格突破均
 
 ### 均线信号示意
 
-![均线信号](ma-signals-510300.png)
+![均线信号](../assets/ma-signals-510300.png)
 
 ## 数据下载
 
@@ -125,5 +125,5 @@ ak.fund_etf_hist_em(symbol="510300", adjust="qfq")
 
 ## 相关笔记
 
-- [[2.1-data-akshare]] — akshare 数据获取
-- [[2.2-dca-backtest]] — 传统 DCA 定投策略
+- [[../01-数据获取/akshare-basics]] — akshare 数据获取
+- [[dca-backtest]] — 传统 DCA 定投策略

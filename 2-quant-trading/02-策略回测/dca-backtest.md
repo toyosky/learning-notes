@@ -100,7 +100,7 @@ def dca_ma_strategy(data: pd.DataFrame,
 
 ### 策略对比图
 
-![策略对比图](strategy-comparison.png)
+![策略对比图](../assets/strategy-comparison.png)
 
 ### 结果解读
 
@@ -129,5 +129,5 @@ monthly_last  = data.resample('ME').last()   # 每月最后一个交易日
 
 ## 相关笔记
 
-- [[2.1-data-akshare]] — 使用 akshare 获取数据
-- [[2.3-ma-crossover-oxq]] — 使用 oxq 框架做策略回测
+- [[../01-数据获取/akshare-basics]] — 使用 akshare 获取数据
+- [[ma-crossover-oxq]] — 使用 oxq 框架做策略回测
