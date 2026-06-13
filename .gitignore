@@ -1,0 +1,16 @@
+# Obsidian
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/cache/
+.obsidian/plugins/
+.trash/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archive (对话历史等临时文件)
+.archive/
+
+# Image backups
+*备份*
