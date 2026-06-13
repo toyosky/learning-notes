@@ -87,7 +87,7 @@ fig.text(0.5, 0.02, text, ha="center", fontsize=10,
          bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.8))
 
 plt.tight_layout()
-out = "/root/obsidian-vault/2-量化交易/etf-comparison.png"
+out = "/root/obsidian-vault/2-quant-trading/etf-comparison.png"
 plt.savefig(out, dpi=150, bbox_inches="tight")
 print(f"\n图表已保存: {out}")
 plt.close()
