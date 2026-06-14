@@ -17,6 +17,11 @@ for symbol, name in etfs.items():
     print(f"✓ {name}: {len(df)} 交易日")
 
 df_all = pd.DataFrame(data)
+
+# 513100 在 2022-01-14 拆股 1:5，修正历史价格
+split_date = '2022-01-14'
+df_all.loc[df_all.index < split_date, '纳指100ETF'] /= 5
+
 df_norm = df_all / df_all.iloc[0] * 100
 
 fig, ax = plt.subplots(figsize=(12, 6))
@@ -32,5 +37,5 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.savefig('etf-comparison-300-nasdaq.png', dpi=150)
 print(f"\n✓ 图表已保存")
-print(f"沪深300ETF: {df_norm['沪深300ETF'].iloc[-1]:.2f}")
-print(f"纳指100ETF: {df_norm['纳指100ETF'].iloc[-1]:.2f}")
+print(f"沪深300ETF: 100 → {df_norm['沪深300ETF'].iloc[-1]:.2f}")
+print(f"纳指100ETF: 100 → {df_norm['纳指100ETF'].iloc[-1]:.2f}")
