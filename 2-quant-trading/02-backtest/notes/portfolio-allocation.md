@@ -131,6 +131,9 @@ return {symbol: iv / total for symbol, iv in inv_vols.items()}
 
 ### 动量排名（Momentum Ranking）
 
+> 以下公式直接给出结论。完整推导链条（从"为什么用对数收益率"到 RAM 的误差传播分析）见独立文章：
+> [[../deep/momentum-ranking-derivation|动量排名数学推导 — 从收益率到排名]]
+
 #### 动量定义
 
 对数动量（log-momentum）：
@@ -406,6 +409,7 @@ strategies = {
 ## 相关笔记
 
 - [[../deep/risk-parity-derivation|风险平价数学推导]] — 完整推导过程
+- [[../deep/momentum-ranking-derivation|动量排名数学推导]] — 完整推导过程
 - [[macro-analysis|三资产宏观分析]] — 前置：相关性分析 + 等权组合 baseline
 - [[../../01-data/notes/akshare-basics|akshare 数据获取]] — 数据来源
 
