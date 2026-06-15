@@ -25,6 +25,9 @@ date: 2026-06-15
 
 ## 数学原理
 
+> 以下公式直接给出结论。完整的推导链条（从"等权 ≠ 等风险"到波动率倒数加权）见独立文章：
+> [[../deep/risk-parity-derivation|风险平价数学推导 — 从零到公式]]
+
 ### 风险平价（Risk Parity）
 
 #### 基本定义
@@ -402,6 +405,7 @@ strategies = {
 
 ## 相关笔记
 
+- [[../deep/risk-parity-derivation|风险平价数学推导]] — 完整推导过程
 - [[macro-analysis|三资产宏观分析]] — 前置：相关性分析 + 等权组合 baseline
 - [[../../01-data/notes/akshare-basics|akshare 数据获取]] — 数据来源
 
