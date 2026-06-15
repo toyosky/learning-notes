@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-均线交叉策略模块 - 独立实现，不依赖 oxq
-基于 2.3-ma-crossover-oxq.md 笔记
+均线交叉策略模块 - 独立实现（pandas 原生，不依赖回测框架）
+基于均线交叉策略笔记（原 open-xquant 策略的独立重实现）
 """
 
 import pandas as pd

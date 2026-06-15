@@ -107,50 +107,6 @@ def plot_ma_signals(df):
     print(f'已保存: {output_path}')
 
 
-def plot_oxq_returns():
-    """绘制oxq策略收益对比图"""
-    # 基于笔记中的数据
-    assets = ['沪深300ETF', '招商银行', '中国平安', '平安银行', '五粮液', '贵州茅台']
-    returns = [13.07, 33.91, 40.59, 11.00, 9.34, -9.20]
-    volatility = [14.43, 19.09, 23.38, 19.07, 22.09, 16.99]
-    sharpe = [0.3662, 0.6254, 0.6196, 0.2835, 0.2486, -0.1110]
-    
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-    fig.suptitle('SMA(1,20) 交叉策略回测结果（2023-2026）', fontsize=14, fontweight='bold')
-    
-    colors = ['#4CAF50' if r >= 0 else '#F44336' for r in returns]
-    
-    # 左图：累计收益率
-    bars1 = ax1.barh(assets, returns, color=colors, alpha=0.8)
-    ax1.set_xlabel('累计收益率 (%)')
-    ax1.set_title('累计收益率')
-    ax1.axvline(x=0, color='black', linewidth=0.5)
-    ax1.grid(True, alpha=0.3, axis='x')
-    for bar, val in zip(bars1, returns):
-        ax1.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height()/2, 
-                f'{val:.1f}%', ha='left', va='center', fontsize=9)
-    
-    # 中图：年化波动率
-    ax2.barh(assets, volatility, color='#2196F3', alpha=0.7)
-    ax2.set_xlabel('年化波动率 (%)')
-    ax2.set_title('年化波动率')
-    ax2.grid(True, alpha=0.3, axis='x')
-    
-    # 右图：夏普比率
-    colors_sharpe = ['#4CAF50' if s >= 0 else '#F44336' for s in sharpe]
-    ax3.barh(assets, sharpe, color=colors_sharpe, alpha=0.8)
-    ax3.set_xlabel('夏普比率')
-    ax3.set_title('夏普比率')
-    ax3.axvline(x=0, color='black', linewidth=0.5)
-    ax3.grid(True, alpha=0.3, axis='x')
-    
-    plt.tight_layout()
-    output_path = os.path.join(OUTPUT_DIR, 'oxq-returns.png')
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f'已保存: {output_path}')
-
-
 if __name__ == '__main__':
     print('获取数据中...')
     df = get_data()
@@ -161,8 +117,5 @@ if __name__ == '__main__':
     
     print('绘制均线信号图...')
     plot_ma_signals(df)
-    
-    print('绘制oxq策略收益图...')
-    plot_oxq_returns()
     
     print('\n全部完成!')
