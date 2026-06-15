@@ -223,47 +223,75 @@ $$
 
 ---
 
-## 代码实现：一个 COMMON，三个策略
+## 代码实现：backtrader 版本
 
-**核心设计：把所有指标注册在同一个信号上，三个策略共享 COMMON，只换 `portfolio=`。**
+回测框架从 oxq 换成了 **backtrader**（Python 最主流通用回测框架）。
+完整代码见 `02-backtest/code/risk_parity.py`，逐段讲解见 [[../deep/bt-portfolio-allocation]]。
 
-```python
-from oxq.portfolio.optimizers import (
-    EqualWeightOptimizer, RiskParityOptimizer, TopNRankingOptimizer,
-)
-from oxq.signals import Threshold
-from oxq.indicators import RollingVolatility, Momentum, Ratio
-from oxq.core import Strategy
+### 设计思想
 
-# 一个信号承载全部指标（三个策略共享）
-signal = Threshold()
-signal.required_indicators = {
-    "mom": (Momentum(), {"column": "close", "period": 20}),
-    "vol": (RollingVolatility(), {"column": "close", "period": 20}),
-    "ram": (Ratio(), {"col_a": "mom", "col_b": "vol"}),
-}
-
-# 公共配置
-COMMON = dict(
-    universe=universe,
-    signals={
-        "signal": (signal, {"column": "close", "threshold": 0, "relationship": "gt"}),
-    },
-)
-
-# 三个策略只在 portfolio 一行不同：
-strategies = {
-    "equal-weight": Strategy(name="equal-weight", **COMMON, portfolio=EqualWeightOptimizer()),
-    "risk-parity": Strategy(name="risk-parity", **COMMON, portfolio=RiskParityOptimizer(volatility_col="vol")),
-    "momentum-rank": Strategy(name="momentum-rank", **COMMON, portfolio=TopNRankingOptimizer(score_col="ram", n=3, filter_negative=True)),
-}
+```
+pandas 预处理（算指标）→  bt.feeds.PandasData 转成 backtrader 格式
+                        →  AssetAllocationStrategy 做每日调仓
 ```
 
-**为什么可以共享？**
-- `EqualWeightOptimizer` 不看指标列，只数信号数量
-- `RiskParityOptimizer(volatility_col="vol")` 只看 `vol` 列
-- `TopNRankingOptimizer(score_col="ram")` 只看 `ram` 列
-- 三者互不冲突，一个信号一次计算，三条优化器各取所需
+**指标计算在 pandas 中完成**（每段代码直接对应数学推导的某一节）：
+
+```python
+# 对数收益率  ← momentum-ranking-derivation §1.3
+df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
+
+# 20 日动量  ← momentum-ranking-derivation §2.2
+df["mom"] = df["log_return"].rolling(20).mean()
+
+# 20 日波动率  ← momentum-ranking-derivation §3.1
+df["vol"] = df["log_return"].rolling(20).std(ddof=1)
+
+# RAM 分数  ← momentum-ranking-derivation §4.1
+df["ram"] = df["mom"] / df["vol"]
+```
+
+**三种分配方法，一个策略类，三个方法参数**：
+
+```python
+class AssetAllocationStrategy(bt.Strategy):
+    params = (("method", "equal-weight"),)
+
+    def next(self):
+        # 收集当前指标
+        vols, rams = {}, {}
+        for d in self.datas:
+            vols[d._name] = d.vol[0]
+            rams[d._name] = d.ram[0]
+
+        # 按策略算权重
+        if self.params.method == "equal-weight":
+            weights = {name: 1/3 for name in SYMBOLS}
+        elif self.params.method == "risk-parity":
+            # w ∝ 1/σ  ← risk-parity-derivation §5.2
+            inv = {k: 1/v for k, v in vols.items() if v and v > 0}
+            total = sum(inv.values())
+            weights = {k: inv[k]/total for k in inv}
+        elif self.params.method == "momentum-rank":
+            # ram 排名 + filter_negative  ← momentum-ranking-derivation §7
+            pos = {k: v for k, v in rams.items() if v and v > 0}
+            total = sum(pos.values())
+            weights = {k: pos[k]/total for k in pos} if total else {}
+
+        # 每日再平衡
+        for d in self.datas:
+            self.order_target_percent(d, weights.get(d._name, 0.0))
+```
+
+**三个 Cerebro 独立运行**（三个 10 万账户各跑各的）：
+
+```python
+for method in ["equal-weight", "risk-parity", "momentum-rank"]:
+    cerebro = bt.Cerebro()
+    cerebro.addstrategy(AssetAllocationStrategy, method=method)
+    cerebro.broker.setcash(100000)
+    cerebro.run()
+```
 
 ---
 
@@ -281,14 +309,14 @@ strategies = {
 
 ### 回测指标对比
 
+> 以下为 backtrader 回测结果。与上一版 oxq 结果的收益率差异在 1-2% 以内（归因于订单执行模型不同：oxq 在当前 bar close 成交，backtrader 在下一 bar open 成交）。权重和排名完全一致。
+
 | 指标 | 等权 | 风险平价 | **动量排名** |
 |------|------|---------|------------|
-| **累计收益率** | +76.95% | +93.37% | **+152.76%** |
-| **年化收益率** | +12.61% | +14.71% | **+21.28%** |
-| **年化波动率** | 11.94% | 10.41% | **14.06%** |
-| **夏普比率** | 1.06 | 1.37 | **1.44** |
-| **最大回撤** | -16.13% | -12.00% | **-9.85%** |
-| **卡尔玛比率** | 0.78 | 1.23 | **2.16** |
+| **累计收益率** | +76.43% | +89.51% | **+133.98%** |
+| **年化收益率** | +12.53% | +14.22% | **+19.33%** |
+| **最大回撤** | -16.44% | -13.38% | **-10.59%** |
+| **夏普比率** | 0.65 | 0.74 | **1.10** |
 
 ### 最新一日权重对比
 
@@ -388,7 +416,7 @@ strategies = {
 
 #### 风险平价
 
-1. **零相关假设**：`RiskParityOptimizer` 简化为 $w_i \propto 1/\sigma_i$，等价于假设 $\rho = 0$。当资产间存在显著相关性时（如上证50与沪深300的 $\rho > 0.8$），风险平价权重与实际风险贡献严重偏离。
+1. **零相关假设**：`_risk_parity()` 简化为 $w_i \propto 1/\sigma_i$，等价于假设 $\rho = 0$。当资产间存在显著相关性时（如上证50与沪深300的 $\rho > 0.8$），风险平价权重与实际风险贡献严重偏离。
 2. **波动率估计的双重放大**：风险贡献 $\operatorname{RC}_i = w_i(\Sigma w)_i / \sigma_p$ 中 $w_i \propto 1/\sigma_i$，代入后 $\operatorname{RC}_i$ 的误差与 $\sigma_i$ 的估计误差成**平方关系**。$\sigma$ 估计偏大 20%，RC 会偏大约 40%。
 3. **收益率不可知**：风险平价不引入任何收益率预期。如果低波动资产长期处于低收益状态（如 2010s 的发达国家国债），风险平价会系统性地配置到低收益资产上——"把风险分散了，但也把低收益分散到了整个组合"。
 4. **杠杆隐式需求**：低波资产的风险贡献天然小，要实现风险平价，要么让低波资产配极高权重（上限可能被约束），要么给低波资产加杠杆。无杠杆版本的风险平价其实是次优解。
@@ -404,12 +432,14 @@ strategies = {
 
 ## 代码文件
 
-- `02-backtest/code/risk_parity.py` — 完整回测脚本（三个策略）
+- `02-backtest/code/risk_parity.py` — backtrader 实现，三策略每日再平衡
 
 ## 相关笔记
 
 - [[../deep/risk-parity-derivation|风险平价数学推导]] — 完整推导过程
 - [[../deep/momentum-ranking-derivation|动量排名数学推导]] — 完整推导过程
+- [[../deep/backtrader-intro|backtrader 核心概念速查]] — 5 个概念入门
+- [[../deep/bt-portfolio-allocation|bt 策略代码讲解]] — `risk_parity.py` 逐段解读
 - [[macro-analysis|三资产宏观分析]] — 前置：相关性分析 + 等权组合 baseline
 - [[../../01-data/notes/akshare-basics|akshare 数据获取]] — 数据来源
 

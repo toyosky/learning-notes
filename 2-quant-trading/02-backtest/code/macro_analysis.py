@@ -90,17 +90,3 @@ ax.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.savefig('/root/obsidian-vault/2-quant-trading/assets/portfolio-comparison.png', dpi=150)
 print("\n✓ 累计收益率对比图已保存")
-
-# ===== 5. oxq StaticUniverse =====
-print("\n===== oxq StaticUniverse =====")
-try:
-    from oxq.universe import StaticUniverse
-    universe = StaticUniverse(symbols=["510300", "513100", "518880"], name="global-macro-etf")
-    snapshot = universe.get_universe(as_of_date="2026-01-01")
-    print(f"✓ 投资宇宙: {universe.name}")
-    print(f"  as_of_date: {snapshot.as_of_date}")
-    print(f"  标的数: {len(snapshot.symbols)}")
-    print(f"  标的: {snapshot.symbols}")
-    print(f"  source: {snapshot.source}")
-except Exception as e:
-    print(f"⚠️  oxq 调用异常: {e}")
