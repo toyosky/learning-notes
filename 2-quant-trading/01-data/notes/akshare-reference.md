@@ -514,6 +514,6 @@ df.loc[df.index < '2022-01-14', ['open', 'high', 'low']] /= 5
 - [[akshare-basics|akshare 数据获取基础]] — 入门教程 / demo
 - [[../deep/forward-vs-backward-adjustment|前复权 vs 后复权]] — 复权概念深挖
 - [[../../02-backtest/notes/dca-backtest|DCA 定投回测]]
-- [[../../02-backtest/notes/ma-crossover-oxq|oxq 均线交叉策略]]
+- [[../../02-backtest/notes/ma-crossover-backtest|均线交叉策略回测]]
 - [[../../02-backtest/notes/macro-analysis|三资产宏观分析]]
 - [[../../02-backtest/notes/portfolio-allocation|组合分配方法对比]]

@@ -130,4 +130,4 @@ ak.stock_zh_a_spot_em()
 ## 相关笔记
 
 - [[../../02-backtest/notes/dca-backtest|DCA 定投回测]] — 基于本数据的 DCA 回测
-- [[../../02-backtest/notes/ma-crossover-oxq|oxq 均线交叉策略]] — 基于 oxq 框架的策略回测
+- [[../../02-backtest/notes/ma-crossover-backtest|均线交叉策略回测]] — 基于 pandas 独立实现的策略回测
