@@ -33,6 +33,7 @@ date: 2026-06-14
 | 笔记 | 内容 |
 |------|------|
 | [[01-data/notes/akshare-basics\|akshare 数据获取]] | 用 akshare 替代 yfinance 获取 A 股/ETF 数据 |
+| [[01-data/notes/akshare-reference\|akshare 接口速查]] | 按数据类型分类的策略开发参考手册 |
 | [[01-data/deep/forward-vs-backward-adjustment\|前复权 vs 后复权]] | 复权概念深挖，对回测收益率的影响 |
 
 ### 02-backtest（策略回测）

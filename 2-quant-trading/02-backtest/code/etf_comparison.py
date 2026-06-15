@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """510300 vs 513100 归一化走势对比"""
 
-import akshare as ak
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
+from data_fetcher import fetch_etf_data
 
-# ── 数据下载 & 前复权处理 ──────────────────────────────────────────
+# ── 数据下载（自动尝试东财 → 回退新浪）─────────────────────────────
 SYMBOLS = {
-    "sh510300": "沪深300ETF",
-    "sh513100": "纳指100ETF",
+    "510300": "沪深300ETF",
+    "513100": "纳指100ETF",
 }
 COLORS = {"沪深300ETF": "#E53935", "纳指100ETF": "#1E88E5"}
 START, END = "2021-01-01", "2026-01-01"
@@ -18,29 +20,7 @@ close_data = {}
 
 for sym, label in SYMBOLS.items():
     print(f"  获取 {sym} ({label}) ...")
-    df = ak.fund_etf_hist_sina(symbol=sym)
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date").reset_index(drop=True)
-
-    # 检测拆股/送股（单日价格变化 > ±50%）
-    pct = df["close"].pct_change()
-    split_idx = pct[pct.abs() > 0.5].index
-    if not split_idx.empty:
-        idx = split_idx[0]
-        factor = df.loc[idx, "close"] / df.loc[idx - 1, "close"]
-        print(f"    检测到拆股: {df.loc[idx,'date'].date()}, 因子={factor:.6f}")
-        # 前复权：调低拆分前的价格
-        for col in ["open", "high", "low", "close"]:
-            df.loc[df.index < idx, col] *= factor
-
-    # 过滤时间窗
-    mask = (df["date"] >= START) & (df["date"] < END)
-    df = df[mask].set_index("date")
-    df.index.name = "Date"
-    df = df.rename(columns={
-        "open": "Open", "high": "High",
-        "low": "Low", "close": "Close", "volume": "Volume",
-    })
+    df = fetch_etf_data(symbol=sym, start_date=START.replace("-", ""), end_date=END.replace("-", ""))
     close_data[label] = df["Close"]
     print(f"    → {len(df)} 条, {df.index[0].date()} ~ {df.index[-1].date()}")
 

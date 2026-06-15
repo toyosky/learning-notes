@@ -17,12 +17,11 @@ OUTPUT_DIR = '/root/obsidian-vault/2-quant-trading'
 
 
 def get_data():
-    """从本地parquet文件获取510300（沪深300ETF）数据"""
-    data_dir = os.path.expanduser('~/.oxq/data/market')
-    df = pd.read_parquet(os.path.join(data_dir, '510300.parquet'))
-    # 确保列名一致
-    df.columns = [c.capitalize() for c in df.columns]
-    return df
+    """使用 akshare（东财源）获取 510300（沪深300ETF）数据"""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
+    from data_fetcher import fetch_etf_data
+    return fetch_etf_data(symbol="510300", start_date="20210101")
 
 
 def plot_stock_price(df):

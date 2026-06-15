@@ -1,26 +1,21 @@
-import akshare as ak
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
+from data_fetcher import fetch_etf_data
 
 font = FontProperties(fname='/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc')
 
-etfs = {"sh510300": "沪深300ETF", "sh513100": "纳指100ETF"}
+etfs = {"510300": "沪深300ETF", "513100": "纳指100ETF"}
 
 data = {}
 for symbol, name in etfs.items():
-    df = ak.fund_etf_hist_sina(symbol=symbol)
-    df['date'] = pd.to_datetime(df['date'])
-    df = df[(df['date'] >= '2021-01-01') & (df['date'] < '2026-01-01')]
-    df = df.set_index('date')
-    data[name] = df['close']
+    df = fetch_etf_data(symbol=symbol, start_date="20210101", end_date="20260101")
+    data[name] = df['Close']
     print(f"✓ {name}: {len(df)} 交易日")
 
 df_all = pd.DataFrame(data)
-
-# 513100 在 2022-01-14 拆股 1:5，修正历史价格
-split_date = '2022-01-14'
-df_all.loc[df_all.index < split_date, '纳指100ETF'] /= 5
 
 df_norm = df_all / df_all.iloc[0] * 100
 

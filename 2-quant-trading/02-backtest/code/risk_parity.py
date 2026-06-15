@@ -57,17 +57,23 @@ class DataFrameMarketDataProvider:
 
 
 def fetch_data() -> dict[str, pd.DataFrame]:
-    """用 akshare 获取三只 ETF 的日线数据，返回 {symbol: DataFrame}。"""
+    """通过 data_fetcher 获取三只 ETF 的日线数据（自动尝试东财 → 回退新浪）。
+    
+    返回 {symbol: DataFrame}，列名为 oxq 要求的 lowercase open/close/high/low/volume。
+    """
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
+    from data_fetcher import fetch_etf_data
+    
     data: dict[str, pd.DataFrame] = {}
-    for symbol, sina_code in [("510300", "sh510300"), ("513100", "sh513100"), ("518880", "sh518880")]:
-        df = ak.fund_etf_hist_sina(symbol=sina_code)
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.set_index("date")
+    for symbol in ("510300", "513100", "518880"):
+        df = fetch_etf_data(symbol=symbol, start_date="20210101", end_date="20260101")
         df.index = df.index.tz_localize(TZ)
+        df = df.rename(columns={
+            "Open": "open", "High": "high", "Low": "low",
+            "Close": "close", "Volume": "volume",
+        })
         data[symbol] = df
-
-    # 修正纳指 100 拆股（2022-01-14 1:5）
-    data["513100"].loc[data["513100"].index < "2022-01-14", "close"] /= 5
 
     return data
 

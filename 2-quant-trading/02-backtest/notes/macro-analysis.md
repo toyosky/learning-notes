@@ -18,19 +18,19 @@ date: 2026-06-14
 
 ## 数据获取
 
-使用 akshare 新浪源获取数据：
+推荐使用 akshare 东方财富源（支持前复权，无需手动处理拆股）：
 
 ```python
 import akshare as ak
 
-df = ak.fund_etf_hist_sina(symbol="sh510300")  # 新浪源，稳定
+df = ak.fund_etf_hist_em(
+    symbol="510300", period="daily",
+    start_date="20210101", end_date="20260101",
+    adjust="qfq"           # 前复权自动处理拆股和分红
+)
 ```
 
-**注意**：513100 在 2022-01-14 进行了 **1:5 拆股**，需手动修正历史价格：
-
-```python
-df.loc[df.index < '2022-01-14', '纳指100'] /= 5
-```
+> 数据接口速查见 [[../../01-data/notes/akshare-reference|AKShare 数据接口速查]]。
 
 ---
 

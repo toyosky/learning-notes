@@ -1,31 +1,30 @@
-import akshare as ak
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
 import matplotlib
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
+from data_fetcher import fetch_etf_data
 
 font = FontProperties(fname='/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc')
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 # ===== 1. 获取数据 =====
+# 使用 data_fetcher（自动尝试东财 → 回退新浪），无需手动处理拆股
 etfs = {
-    "sh510300": "沪深300",
-    "sh513100": "纳指100",
-    "sh518880": "黄金"
+    "510300": "沪深300",
+    "513100": "纳指100",
+    "518880": "黄金"
 }
 
 data = {}
 for symbol, name in etfs.items():
-    df_etf = ak.fund_etf_hist_sina(symbol=symbol)
-    df_etf['date'] = pd.to_datetime(df_etf['date'])
-    df_etf = df_etf[(df_etf['date'] >= '2021-01-01') & (df_etf['date'] < '2026-01-01')]
-    df_etf = df_etf.set_index('date')
-    data[name] = df_etf['close']
+    df_etf = fetch_etf_data(symbol=symbol, start_date="20210101", end_date="20260101")
+    data[name] = df_etf['Close']
     print(f"✓ {name}: {len(df_etf)} 交易日")
 
 df = pd.DataFrame(data)
-df.loc[df.index < '2022-01-14', '纳指100'] /= 5
 
 print(f"\n数据范围: {df.index[0].date()} ~ {df.index[-1].date()}")
 print(df.tail())

@@ -76,17 +76,25 @@ Date
 ## akshare 常用函数速查
 
 ```python
-# A 股日线
+# A 股日线（东财，支持复权）
 ak.stock_zh_a_hist(symbol="600519", period="daily", adjust="qfq")
 
-# ETF 日线
+# ETF 日线（东财，推荐）
 ak.fund_etf_hist_em(symbol="510300", period="daily", adjust="qfq")
 
-# 指数行情
+# ETF 日线（新浪，需手动复权）
+ak.fund_etf_hist_sina(symbol="sh510300")  # 需加 "sh"/"sz" 前缀
+
+# 指数日线
 ak.stock_zh_index_daily(symbol="sh000001")
 
-# 实时行情
+# 指数日线（东财，支持周/月）
+ak.index_zh_a_hist(symbol="000300", period="daily")
+
+# 实时全量行情
 ak.stock_zh_a_spot_em()
+
+# 完整速查 → [[akshare-reference|AKShare 数据接口速查]]
 ```
 
 ## 返回列说明
@@ -104,7 +112,13 @@ ak.stock_zh_a_spot_em()
 1. **虚拟环境**：务必在虚拟环境中运行，避免污染系统 Python
 2. **日期格式**：`"YYYYMMDD"` 格式，不是 `"YYYY-MM-DD"`
 3. **复权处理**：`adjust="qfq"` = 前复权，`adjust=""` = 不复权
-4. **数据量**：2021-01-01 至今共 1317 个交易日（截至 2026-06-12）
+4. **数据量**：2021-01-01 至今共 1212 个交易日（截至 2025-12-31，视数据源而定）
+
+## 速查入口
+
+> 🔍 写策略时找数据接口？点这里。
+> 
+> - [[akshare-reference|AKShare 数据接口速查]] — 按数据类型分类的完整参考手册
 
 ## 深挖入口
 

@@ -412,6 +412,8 @@ def plot_multi_symbol_comparison(
 
 if __name__ == "__main__":
     # 示例：单标的回测
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
     from data_fetcher import fetch_etf_data
     
     # 获取数据
