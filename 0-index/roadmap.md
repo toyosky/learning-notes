@@ -40,13 +40,13 @@ date: 2026-06-13
 
 ### 回测篇
 - [[2.2-dca-backtest]] — DCA 定投 + 均线择时回测
-- [[2.3-ma-crossover-oxq]] — 使用 open-xquant 框架做策略回测
+- [[2.2-ma-crossover-backtest|均线交叉策略回测]] — pandas 独立实现 + backtrader 框架
 
 ### 推荐学习路径
 ```
 数据获取 → 简单回测 → 策略开发 → 框架化
     ↓          ↓          ↓          ↓
- 2.1-数据   2.2-DCA    2.2-均线   2.3-oxq
+ 2.1-数据   2.2-DCA    2.2-均线   2.3-组合分配
 ```
 
 ## 关于本库

@@ -104,6 +104,6 @@ nav:
       - 前复权 vs 后复权: 2-quant-trading/01-data/deep/forward-vs-backward-adjustment.md
     - 策略回测:
       - DCA 定投回测: 2-quant-trading/02-backtest/notes/dca-backtest.md
-      - oxq 均线交叉策略: 2-quant-trading/02-backtest/notes/ma-crossover-oxq.md
+      - 均线交叉策略回测: 2-quant-trading/02-backtest/notes/ma-crossover-backtest.md
       - 三资产宏观分析: 2-quant-trading/02-backtest/notes/macro-analysis.md
       - 风险平价 vs 动量排名: 2-quant-trading/02-backtest/notes/portfolio-allocation.md

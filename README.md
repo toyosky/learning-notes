@@ -28,4 +28,4 @@
 | 🧠 AI 基础 | Transformer 结构、LLM → VLM |
 | 🔧 微调技术 | LoRA 入门、数学原理 |
 | 🚗 实战项目 | VLM 自动驾驶场景理解 |
-| 📊 量化交易 | akshare 数据获取、DCA 定投回测、oxq 策略回测 |
+| 📊 量化交易 | akshare 数据获取、DCA 定投回测、backtrader 策略回测 |
