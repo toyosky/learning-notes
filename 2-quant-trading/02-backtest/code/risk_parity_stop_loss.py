@@ -22,20 +22,23 @@ COMMISSION_RATE = 0.001
 MIN_COMMISSION = 5.0
 
 CONFIGS = [
-    ("none",         None,  None,  "无止损失"),
-    ("sl_5",         0.05,  None,  "5% 止损"),
-    ("sl_5_tp_10",   0.05,  0.10,  "止5%+盈10%"),
-    ("sl_5_tp_20",   0.05,  0.20,  "止5%+盈20%"),
-    ("tp_10",        None,  0.10,  "10%止盈"),
-    ("tp_20",        None,  0.20,  "20%止盈"),
+    ("none",          None,  None,  False,  "无止损失"),
+    ("sl_5",          0.05,  None,  False,  "5% 止损"),
+    ("sl_5_immediate", 0.05,  None,  True,  "5%止+即时重配"),
+    ("sl_5_tp_10",    0.05,  0.10,  False,  "止5%+盈10%"),
+    ("sl_5_tp_20",    0.05,  0.20,  False,  "止5%+盈20%"),
+    ("tp_10",         None,  0.10,  False,  "10%止盈"),
+    ("tp_20",         None,  0.20,  False,  "20%止盈"),
 ]
 CFG_COLORS = {
     "none": "#2196F3", "sl_5": "#e67e22",
+    "sl_5_immediate": "#f39c12",
     "sl_5_tp_10": "#2ecc71", "sl_5_tp_20": "#27ae60",
     "tp_10": "#9b59b6", "tp_20": "#8e44ad",
 }
 CFG_LINESTYLES = {
     "none": "-", "sl_5": "--",
+    "sl_5_immediate": ":",
     "sl_5_tp_10": "-.", "sl_5_tp_20": ":",
     "tp_10": "--", "tp_20": "-.",
 }
@@ -81,6 +84,7 @@ class RiskParityWithStopLoss(bt.Strategy):
         ("rebalance_freq", "monthly"),
         ("drawdown_stop", None),
         ("take_profit", None),
+        ("rebalance_on_stop", False),
     )
 
     def __init__(self):
@@ -145,7 +149,22 @@ class RiskParityWithStopLoss(bt.Strategy):
                             self._sold_etfs[d._name] = "take"
                             events["taken"].append(d._name)
 
-        # ── 再平衡日：重置状态，重新分配权重 ──
+        # ── 止损后即时重配：将现金重新分配到剩余 ETF ──
+        if self.params.rebalance_on_stop and (events["stopped"] or events["taken"]):
+            remaining = [d for d in self.datas if d._name not in self._sold_etfs]
+            if remaining:
+                vols = {}
+                for d in remaining:
+                    vols[d._name] = d.vol[0]
+                clean = {k: v for k, v in vols.items()
+                         if v is not None and v > 0 and not np.isnan(v)}
+                if clean:
+                    inv = {k: 1.0 / v for k, v in clean.items()}
+                    total = sum(inv.values())
+                    for d in remaining:
+                        self.order_target_percent(d, inv[d._name] / total)
+
+        # ── 再平衡日 ──
         if is_rebalance:
             self._sold_etfs.clear()
             for d in self.datas:
@@ -174,6 +193,7 @@ class RiskParityWithStopLoss(bt.Strategy):
 # ══════════════════════════════════════════════════════════════════
 
 def run_one(key: str, sl_threshold: float | None, tp_threshold: float | None,
+            rebalance_on_stop: bool,
             data_panel: dict[str, pd.DataFrame]) -> dict:
     cerebro = bt.Cerebro()
     for symbol, df in data_panel.items():
@@ -186,6 +206,7 @@ def run_one(key: str, sl_threshold: float | None, tp_threshold: float | None,
         rebalance_freq="monthly",
         drawdown_stop=sl_threshold,
         take_profit=tp_threshold,
+        rebalance_on_stop=rebalance_on_stop,
     )
     cerebro.broker.setcash(INITIAL_CASH)
 
@@ -244,7 +265,7 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
 
     # ── Chart 1: 净值对比 ──
     fig1, ax1 = plt.subplots(figsize=(16, 7))
-    for key, _, _, label in CONFIGS:
+    for key, _, _, _, label in CONFIGS:
         recs = results[key]["history"]
         df = pd.DataFrame([{"date": r[0], "value": r[1]} for r in recs])
         df["date"] = pd.to_datetime(df["date"])
@@ -279,10 +300,10 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
     plt.close(fig1)
     print("  ✓ assets/rp-sl-tp-nav-compare.png")
 
-    # ── Chart 2: 事件标注（2×3 子图） ──
-    fig2, axes = plt.subplots(2, 3, figsize=(18, 10))
+    # ── Chart 2: 事件标注（3×3 子图，隐藏多余） ──
+    fig2, axes = plt.subplots(3, 3, figsize=(18, 12))
     axes = axes.flatten()
-    for idx, (key, _, _, label) in enumerate(CONFIGS):
+    for idx, (key, _, _, _, label) in enumerate(CONFIGS):
         ax = axes[idx]
         recs = results[key]["history"]
         df = pd.DataFrame([
@@ -318,6 +339,8 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=12))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+    for ax in axes[len(CONFIGS):]:
+        ax.set_visible(False)
     fig2.suptitle("风险平价止损/止盈触发点标注（▼止损 ▲止盈）",
                   fontsize=14, fontweight="bold")
     fig2.tight_layout()
@@ -328,7 +351,7 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
 
     # ── Chart 3: 回撤曲线对比 ──
     fig3, ax3 = plt.subplots(figsize=(16, 5))
-    for key, _, _, label in CONFIGS:
+    for key, _, _, _, label in CONFIGS:
         values = [h[1] for h in results[key]["history"]]
         peak = np.maximum.accumulate(values)
         dd = (peak - np.array(values)) / peak
@@ -363,7 +386,7 @@ if __name__ == "__main__":
     print("  止损 + 止盈保护研究 — 风险平价")
     print(f"  策略: 风险平价 + 每月再平衡")
     print(f"  佣金: {COMMISSION_RATE:.1%}  最低 ¥{MIN_COMMISSION:.0f}")
-    print(f"  方案: {' | '.join(c[3] for c in CONFIGS)}")
+    print(f"  方案: {' | '.join(c[4] for c in CONFIGS)}")
     print("=" * 72)
 
     print("\n▶ 获取数据 + 计算指标...")
@@ -373,10 +396,10 @@ if __name__ == "__main__":
 
     print("\n▶ 运行回测...")
     results = {}
-    for key, sl_th, tp_th, label in CONFIGS:
+    for key, sl_th, tp_th, rebal_on_stop, label in CONFIGS:
         print(f"  ▶ {label:>10}...", end=" ")
         sys.stdout.flush()
-        results[key] = run_one(key, sl_th, tp_th, panel)
+        results[key] = run_one(key, sl_th, tp_th, rebal_on_stop, panel)
         r = results[key]
         parts = [f"¥{r['final_value']:>8,.0f}  ({r['total_return']:+>+7.2%})",
                  f"夏普 {r['sharpe']:.2f}",
@@ -393,7 +416,7 @@ if __name__ == "__main__":
     header = f"  {'方案':<12} {'最终值':>10} {'累计收益':>10} {'年化收益':>10} {'最大回撤':>10} {'夏普':>8} {'止损天':>6} {'止盈天':>6}"
     print(header)
     print(f"  {'─' * 78}")
-    for key, _, _, label in CONFIGS:
+    for key, _, _, _, label in CONFIGS:
         r = results[key]
         print(f"  {label:<12}"
               f" ¥{r['final_value']:>8,.0f}"
