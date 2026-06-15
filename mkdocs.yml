@@ -51,6 +51,10 @@ theme:
         icon: material/brightness-4
         name: 切换亮色模式
 
+# ── Hook: 修复 roamlinks 对符号链接的支持 ─────────────────
+hooks:
+  - hooks/fix_roamlinks.py
+
 # ── 插件 ─────────────────────────────────────────────────────
 plugins:
   - search

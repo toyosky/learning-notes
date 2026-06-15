@@ -27,11 +27,13 @@
     code/data_fetcher.py        — 数据获取脚本
   02-backtest/                  — 策略回测
     notes/dca-backtest.md       — DCA 定投回测
-    notes/ma-crossover-oxq.md   — oxq 均线交叉策略
+     notes/ma-crossover-oxq.md   — oxq 均线交叉策略
+     notes/portfolio-allocation.md — 等权 vs 风险平价 vs 动量排名
     code/macro_analysis.py      — 三资产宏观分析
-    code/etf_comparison_300_nasdaq.py — 沪深300 vs 纳指100
-    code/dca_backtest.py        — DCA 回测脚本
-    code/ma_strategy.py         — 均线策略脚本
+     code/etf_comparison_300_nasdaq.py — 沪深300 vs 纳指100
+     code/risk_parity.py         — 风险平价 & 动量排名（三策略对比）
+     code/dca_backtest.py        — DCA 回测脚本
+     code/ma_strategy.py         — 均线策略脚本
   assets/                       — 图表资源
     correlation-heatmap.png     — 相关性热力图
     portfolio-comparison.png    — 组合收益对比图
@@ -66,13 +68,44 @@ uv pip install --python .venv/bin/python git+https://github.com/xingwudao/open-x
 - **513100 拆股**: 2022-01-14 进行 1:5 拆股，需手动修正历史价格
 - **Yahoo Finance**: 限流严重，不推荐
 
+## GitHub Pages 文档站
+
+笔记通过 **MkDocs + Material 主题** 构建为静态站点，自动部署到 GitHub Pages。
+
+### 站点地址
+`https://toyosky.github.io/learning-notes`
+
+### 自动部署机制
+- **触发**：`git push main` 自动触发 GitHub Actions
+- **工作流**：`.github/workflows/deploy-pages.yml`
+- **流程**：`pip install mkdocs-material` → `mkdocs build` → `actions/deploy-pages` 推 `gh-pages` 分支
+- **耗时**：约 1-2 分钟
+
+### 关键配置
+- **`mkdocs.yml`** — 站点配置文件（主题/导航/MathJax/插件）
+- **`docs/`** — 构建源目录，内含 `README.md` 和子目录的 **symlink** 指向仓库根目录（不破坏 Obsidian 结构）
+- **MathJax 3** — LaTeX `$$` 公式渲染
+
+### 本地预览
+```bash
+mkdocs serve    # 访问 http://127.0.0.1:8000
+```
+
+### 注意事项
+- 新增笔记时需同步更新 `mkdocs.yml` 的 `nav:` 配置
+- 页面间的 `[[wiki-links]]` 由 `mkdocs-roamlinks-plugin` 处理，部分相对路径链接可能不生效（不影响阅读）
+- 构建不通过 `--strict`，预存的链接警告不会阻断部署
+- `.venv/`、`.omo/`、`.obsidian/` 等已在 `exclude_docs` 排除
+
 ## Workflow
 ```bash
-# 提交笔记
+# 提交笔记（自动触发 GitHub Pages 更新）
 git add -A && git commit -m "描述修改内容"
-git push origin main     # 推 GitHub
+git push github main     # 推 GitHub（触发 Pages 部署）
 
-# 新增笔记后，记得更新 0-index/roadmap.md 中的链接
+# 新增笔记后，记得更新：
+#   - mkdocs.yml 的 nav:
+#   - 0-index/roadmap.md 中的链接
 ```
 
 ## Notes
