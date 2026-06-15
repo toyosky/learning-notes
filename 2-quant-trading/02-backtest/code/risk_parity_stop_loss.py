@@ -77,14 +77,17 @@ class ETFData(bt.feeds.PandasData):
 # ══════════════════════════════════════════════════════════════════
 
 class RiskParityWithStopLoss(bt.Strategy):
-    """风险平价 + 回撤止损。
+    """风险平价 + 单 ETF 止损。
+
+    每只 ETF 独立监控止损：从买入均价（avg_cost）跌了 X% 就卖出该只，
+    其余 ETF 不受影响。下一个再平衡日再重新评估是否买回。
 
     Parameters
     ----------
     rebalance_freq : int | str
         再平衡频率（默认 "monthly"）。
     drawdown_stop : float | None
-        回撤止损阈值，None = 不止损。
+        单 ETF 止损阈值，None = 不止损。
     """
     params = (
         ("rebalance_freq", "monthly"),
@@ -92,11 +95,13 @@ class RiskParityWithStopLoss(bt.Strategy):
     )
 
     def __init__(self):
-        self.history = []       # [(date, value, {sym: weight}, is_stopped)]
+        self.history = []       # [(date, value, {sym: weight}, stopped_etfs)]
         self._bars_since_rebalance = 0
         self._last_month = None
-        self._peak_value = INITIAL_CASH
-        self._stopped_out = False
+        # 单 ETF 止损状态：{symbol: True} 表示该 ETF 已被止损卖出
+        self._stopped_etfs: dict[str, bool] = {}
+        # 记录每只 ETF 的买入均价
+        self._avg_costs: dict[str, float] = {}
 
     def _compute_weights(self) -> dict:
         """风险平价权重 w_i ∝ 1/σ_i"""
@@ -125,46 +130,43 @@ class RiskParityWithStopLoss(bt.Strategy):
         current_value = self.broker.getvalue()
         weights = self._compute_weights()
         is_rebalance = self._is_rebalance_day()
+        stopped_now = []
 
-        # ── 更新峰值（仅非止损状态） ──
-        if not self._stopped_out:
-            self._peak_value = max(self._peak_value, current_value)
+        # ── 单 ETF 止损检查（每根 bar） ──
+        if self.params.drawdown_stop is not None:
+            for d in self.datas:
+                pos = self.getposition(d)
+                if pos.size > 0:
+                    current_price = d.close[0]
+                    if d._name not in self._avg_costs:
+                        self._avg_costs[d._name] = pos.price
+                    avg_cost = self._avg_costs[d._name]
+                    if avg_cost > 0:
+                        dd = (avg_cost - current_price) / avg_cost
+                        if dd >= self.params.drawdown_stop:
+                            self.order_target_percent(d, 0.0)
+                            self._stopped_etfs[d._name] = True
+                            stopped_now.append(d._name)
 
-        # ── 检查止损触发 ──
-        stop_now = False
-        if self.params.drawdown_stop is not None and not self._stopped_out:
-            dd = (self._peak_value - current_value) / self._peak_value
-            if dd >= self.params.drawdown_stop:
-                stop_now = True
-                self._stopped_out = True
-                for d in self.datas:
-                    self.order_target_percent(d, 0.0)
-
-        # ── 已止损：等再平衡日重新入场 ──
-        if self._stopped_out:
-            if is_rebalance:
-                self._stopped_out = False
-                self._peak_value = current_value
-                # 继续向下执行正常再平衡
-            else:
-                self.history.append((
-                    self.datas[0].datetime.date(0).isoformat(),
-                    current_value, dict(weights), True,
-                ))
-                self._bars_since_rebalance += 1
-                return
-
-        # ── 正常操作 ──
-        self.history.append((
-            self.datas[0].datetime.date(0).isoformat(),
-            current_value, dict(weights), stop_now,
-        ))
-
+        # ── 再平衡日：重置止损状态，重新分配权重 ──
         if is_rebalance:
+            self._stopped_etfs.clear()
             for d in self.datas:
                 self.order_target_percent(d, weights.get(d._name, 0.0))
+                pos = self.getposition(d)
+                if pos.size > 0:
+                    self._avg_costs[d._name] = pos.price
+
+        # ── 记录历史 ──
+        self.history.append((
+            self.datas[0].datetime.date(0).isoformat(),
+            current_value, dict(weights), stopped_now,
+        ))
 
         self._bars_since_rebalance += 1
+        if isinstance(self.params.rebalance_freq, int) and \
+           self._bars_since_rebalance >= self.params.rebalance_freq:
+            self._bars_since_rebalance = 0
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -204,7 +206,7 @@ def run_one(sl_key: str, sl_threshold: float | None,
     cerebro.run()
     strat = cerebro.runstrats[0][0]
 
-    stop_events = [(h[0], h[1]) for h in strat.history if h[3]]
+    stop_events = [(h[0], h[1], h[3]) for h in strat.history if h[3]]
     ret = strat.analyzers.returns.get_analysis()
     sharpe = strat.analyzers.sharpe.get_analysis()
     dd = strat.analyzers.drawdown.get_analysis()
@@ -218,7 +220,7 @@ def run_one(sl_key: str, sl_threshold: float | None,
         "annual_return": ret.get("rnorm100", 0) / 100,
         "sharpe": sharpe.get("sharperatio", 0),
         "max_drawdown": dd.get("max", {}).get("drawdown", 0) / 100,
-        "n_stops": len(stop_events),
+        "n_stops": sum(1 for h in strat.history if h[3]),
     }
 
 
@@ -285,7 +287,8 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
         ax = axes[idx]
         recs = results[sl_key]["history"]
         df = pd.DataFrame([
-            {"date": r[0], "value": r[1], "stopped": r[3]} for r in recs
+            {"date": r[0], "value": r[1], "stopped": len(r[3]) > 0}
+            for r in recs
         ])
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date")
