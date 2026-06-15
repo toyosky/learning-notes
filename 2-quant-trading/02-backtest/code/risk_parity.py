@@ -2,15 +2,14 @@
 """
 等权 / 风险平价 / 动量排名 — backtrader 实现。
 
-设计：
-  数据预处理（pandas 计算出 mom, vol, ram）→ 传给 backtrader
-  → 一个策略类，method 参数切换三种分配方式
-  → 每日再平衡（order_target_percent）
+回测 + 图表生成。
+每根 bar 记录组合价值和权重历史，留作可视化使用。
 
 与数学推导的对应关系：
   - mom, vol, ram 的计算 → 见 momentum-ranking-derivation.md
   - 风险平价逻辑（RC 分解, w ∝ 1/σ）→ 见 risk-parity-derivation.md
   - backtrader 框架概念 → 见 backtrader-intro.md
+  - 代码逐段讲解 → 见 bt-portfolio-allocation.md
 """
 
 import backtrader as bt
@@ -21,169 +20,115 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../01-data/code"))
 from data_fetcher import fetch_etf_data
 
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "../../assets")
 
-# ══════════════════════════════════════════════════════════════════
-# 常量
-# ══════════════════════════════════════════════════════════════════
-
+# ── 常量 ──
 SYMBOLS = {"510300": "沪深300", "513100": "纳指100", "518880": "黄金"}
-START = "2021-01-01"
-END = "2025-12-31"
+METHODS = ["equal-weight", "risk-parity", "momentum-rank"]
+METHOD_LABELS = {
+    "equal-weight": "等权",
+    "risk-parity": "风险平价",
+    "momentum-rank": "动量排名",
+}
+METHOD_COLORS = {
+    "equal-weight": "#2196F3",
+    "risk-parity": "#4CAF50",
+    "momentum-rank": "#FF9800",
+}
+SYMBOL_COLORS = {"510300": "#E53935", "513100": "#1E88E5", "518880": "#FDD835"}
 INITIAL_CASH = 100_000.0
-MOM_PERIOD = 20  # 动量/波动率窗口
+MOM_PERIOD = 20
 
 
 # ══════════════════════════════════════════════════════════════════
-# 1. 数据准备（纯 pandas，与 backtrader 无关）
+# 1. 数据准备（纯 pandas）
 # ══════════════════════════════════════════════════════════════════
 
 def build_panel() -> dict[str, pd.DataFrame]:
-    """
-    获取三只 ETF 数据，并算出所有指标列。
-
-    返回 {symbol: DataFrame}，列含:
-      Open, High, Low, Close, Volume  — 原始行情
-      log_return                      — 日度对数收益率 r_t = ln(P_t / P_{t-1})
-      mom                             — 20 日对数动量 = avg(r)
-      vol                             — 20 日波动率 = std(r, ddof=1)
-      ram                             — mom / vol
-    """
+    """获取数据 + 计算 mom, vol, ram，返回 {symbol: DataFrame}。"""
     data = {}
     for symbol in ("510300", "513100", "518880"):
         df = fetch_etf_data(symbol=symbol, start_date="20210101", end_date="20260101")
-
-        # — 指标计算（对应 momentum-ranking-derivation.md §1-4） —
-        # §1.3 对数收益率：r_t = ln(P_t / P_{t-1})
+        # 对数收益率  ← momentum-ranking-derivation §1.3
         df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
-
-        # §2.2 动量：mom = avg(r) over N days
+        # N 日动量  ← momentum-ranking-derivation §2.2
         df["mom"] = df["log_return"].rolling(MOM_PERIOD).mean()
-
-        # §3.1 波动率：vol = std(r, ddof=1) over N days
+        # N 日波动率  ← momentum-ranking-derivation §3.1
         df["vol"] = df["log_return"].rolling(MOM_PERIOD).std(ddof=1)
-
-        # §4.1 RAM = mom / vol
+        # RAM = mom / vol  ← momentum-ranking-derivation §4.1
         df["ram"] = df["mom"] / df["vol"]
-
         data[symbol] = df
-
     return data
 
 
 # ══════════════════════════════════════════════════════════════════
-# 2. backtrader 数据馈送（PandasData with extra lines）
+# 2. 数据馈送
 # ══════════════════════════════════════════════════════════════════
 
 class ETFData(bt.feeds.PandasData):
-    """
-    PandasData 子类：把 DataFrame 里的 mom, vol, ram 列映射为 backtrader lines。
-    这样策略代码里就能用 data.mom[0], data.vol[0], data.ram[0] 访问。
-    """
+    """把 DataFrame 的 mom, vol, ram 列映射为 backtrader lines。"""
     lines = ("mom", "vol", "ram")
-
     params = (
-        ("datetime", None),       # 用 DataFrame.index 做日期
-        ("open", "Open"),
-        ("high", "High"),
-        ("low", "Low"),
-        ("close", "Close"),
-        ("volume", "Volume"),
-        ("mom", "mom"),
-        ("vol", "vol"),
-        ("ram", "ram"),
+        ("datetime", None),
+        ("open", "Open"), ("high", "High"), ("low", "Low"),
+        ("close", "Close"), ("volume", "Volume"),
+        ("mom", "mom"), ("vol", "vol"), ("ram", "ram"),
     )
 
 
 # ══════════════════════════════════════════════════════════════════
-# 3. 策略
+# 3. 策略（记录每日历史用于出图）
 # ══════════════════════════════════════════════════════════════════
 
 class AssetAllocationStrategy(bt.Strategy):
-    """
-    三合一策略，由 params.method 切换：
-
-      "equal-weight"   — §portfolio-allocation.md: 固定 1/3
-      "risk-parity"    — §risk-parity-derivation.md: w ∝ 1/σ
-      "momentum-rank"  — §momentum-ranking-derivation.md: ram 排名
-    """
-    params = (
-        ("method", "equal-weight"),
-    )
+    """三合一策略，由 params.method 切换三种分配方式。"""
+    params = (("method", "equal-weight"),)
 
     def __init__(self):
-        # 记录每只数据对应的最近权重（用于日志）
-        self.target_weights = {}
+        self.history = []  # [(date_str, portfolio_value, {symbol: weight})]
 
     def next(self):
-        """
-        每根 bar 调用一次。收集当前指标 → 算权重 → order_target_percent 调仓。
-        """
-        # ── 收集当前指标 ──
-        vols = {}
-        rams = {}
+        vols, rams = {}, {}
         for d in self.datas:
-            name = d._name
-            vols[name] = d.vol[0]
-            rams[name] = d.ram[0]
+            vols[d._name] = d.vol[0]
+            rams[d._name] = d.ram[0]
 
-        # ── 按策略算权重 ──
         if self.params.method == "equal-weight":
-            weights = self._equal_weight()
-
+            weights = {name: 1.0 / len(SYMBOLS) for name in SYMBOLS}
         elif self.params.method == "risk-parity":
             weights = self._risk_parity(vols)
-
-        elif self.params.method == "momentum-rank":
+        else:
             weights = self._momentum_rank(rams)
 
-        else:
-            raise ValueError(f"未知方法: {self.params.method}")
+        # 记录历史
+        self.history.append((
+            self.datas[0].datetime.date(0).isoformat(),
+            self.broker.getvalue(),
+            dict(weights),
+        ))
 
-        # ── 执行调仓 ──
-        # order_target_percent 会自动计算当前持有 vs 目标权重的差异，只交易差额
+        # 调仓
         for d in self.datas:
-            name = d._name
-            target = weights.get(name, 0.0)
-            self.order_target_percent(d, target)
-
-    # ── 三种分配方式 ──────────────────────────────────────────────
+            self.order_target_percent(d, weights.get(d._name, 0.0))
 
     @staticmethod
-    def _equal_weight():
-        """等权：每只资产 1/n。"""
-        n = len(SYMBOLS)  # 3 只
-        return {name: 1.0 / n for name in SYMBOLS}
-
-    @staticmethod
-    def _risk_parity(vols: dict[str, float]) -> dict[str, float]:
-        """
-        风险平价：w_i ∝ 1/σ_i。
-
-        对应 risk-parity-derivation.md §5.2-5.3：
-          当 ρ=0 时，风险平价条件 w_i σ_i = w_j σ_j 的解
-          假设所有 vol > 0（否则给等权）。
-        """
-        vols_clean = {k: v for k, v in vols.items() if v is not None and v > 0 and not np.isnan(v)}
-        if not vols_clean:
+    def _risk_parity(vols):
+        """w_i ∝ 1/σ_i  ← risk-parity-derivation.md §5.2"""
+        clean = {k: v for k, v in vols.items()
+                 if v is not None and v > 0 and not np.isnan(v)}
+        if not clean:
             return {name: 1.0 / len(SYMBOLS) for name in SYMBOLS}
-
-        inv = {k: 1.0 / v for k, v in vols_clean.items()}
+        inv = {k: 1.0 / v for k, v in clean.items()}
         total = sum(inv.values())
         return {k: inv[k] / total for k in inv}
 
     @staticmethod
-    def _momentum_rank(rams: dict[str, float]) -> dict[str, float]:
-        """
-        动量排名：只选 ram > 0 的，按 ram 比例分配权重。
-
-        对应 momentum-ranking-derivation.md §7：
-          filter_negative=True → w_i = ram_i⁺ / sum(ram⁺)
-          如果所有 ram ≤ 0，返回空权重（全现金）。
-        """
-        pos = {k: v for k, v in rams.items() if v is not None and v > 0 and not np.isnan(v)}
+    def _momentum_rank(rams):
+        """w_i = ram_i⁺ / sum(ram⁺)  ← momentum-ranking-derivation.md §7"""
+        pos = {k: v for k, v in rams.items()
+               if v is not None and v > 0 and not np.isnan(v)}
         if not pos:
-            return {}  # 全现金
-
+            return {}
         total = sum(pos.values())
         return {k: pos[k] / total for k in pos}
 
@@ -192,168 +137,241 @@ class AssetAllocationStrategy(bt.Strategy):
 # 4. 回测运行器
 # ══════════════════════════════════════════════════════════════════
 
-def run_backtest(method: str, data_panel: dict[str, pd.DataFrame]) -> bt.Cerebro:
-    """
-    运行单个策略回测。
-
-    参数:
-      method: "equal-weight" | "risk-parity" | "momentum-rank"
-      data_panel: build_panel() 的输出
-
-    返回:
-      运行完毕的 Cerebro 实例（通过 cerebro.broker.getvalue() 获取结果）
-    """
+def run_one(method: str, data_panel: dict[str, pd.DataFrame]) -> dict:
+    """运行单个策略。返回结果字典（含 history 列表）。"""
     cerebro = bt.Cerebro()
-
-    # ├─ 添加数据
     for symbol, df in data_panel.items():
         feed = ETFData(dataname=df)
-        # 在 cerebro 里给数据命名，方便策略中用 d._name 识别
         feed._name = symbol
         cerebro.adddata(feed)
 
-    # ├─ 添加策略
     cerebro.addstrategy(AssetAllocationStrategy, method=method)
-
-    # ├─ 经纪人设置
     cerebro.broker.setcash(INITIAL_CASH)
-    # 设置交易成本（暂未考虑）
     cerebro.broker.setcommission(commission=0.0)
 
-    # ├─ 添加分析器（用于提取指标）
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
-    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe", riskfreerate=0.03, annualize=True)
+    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe",
+                        riskfreerate=0.03, annualize=True)
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
-    cerebro.addanalyzer(bt.analyzers.VWR, _name="vwr")
 
-    # ── 运行 ──
     cerebro.run()
+    strat = cerebro.runstrats[0][0]
+    ret = strat.analyzers.returns.get_analysis()
+    sharpe = strat.analyzers.sharpe.get_analysis()
+    dd = strat.analyzers.drawdown.get_analysis()
+    final_value = cerebro.broker.getvalue()
 
-    return cerebro
+    return {
+        "history": strat.history,
+        "final_value": final_value,
+        "total_return": (final_value / INITIAL_CASH) - 1,
+        "annual_return": ret.get("rnorm100", 0) / 100,
+        "sharpe": sharpe.get("sharperatio", 0),
+        "max_drawdown": dd.get("max", {}).get("drawdown", 0) / 100,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════
-# 5. 主流程
+# 5. 可视化
+# ══════════════════════════════════════════════════════════════════
+
+def _init_mpl():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    plt.rcParams["font.sans-serif"] = ["WenQuanYi Micro Hei", "SimHei", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+    return plt, mdates
+
+
+def generate_charts(results: dict[str, dict], panel: dict[str, pd.DataFrame]):
+    """生成 4 张图，保存到 assets/。"""
+    plt, mdates = _init_mpl()
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+
+    # ── 整理数据 ──
+    value_dfs = {}
+    weight_dfs = {}
+    for m in METHODS:
+        recs_v = [{"date": h[0], "value": h[1]} for h in results[m]["history"]]
+        value_dfs[m] = pd.DataFrame(recs_v).set_index("date")
+        value_dfs[m].index = pd.to_datetime(value_dfs[m].index)
+
+        if m != "equal-weight":
+            recs_w = [{"date": h[0], **h[2]} for h in results[m]["history"]]
+            df_w = pd.DataFrame(recs_w).set_index("date")
+            df_w.index = pd.to_datetime(df_w.index)
+            for s in ("510300", "513100", "518880"):
+                if s not in df_w.columns:
+                    df_w[s] = 0.0
+            weight_dfs[m] = df_w[["510300", "513100", "518880"]]
+
+    # ── Chart 1: 累计净值对比 ──────────────────────────────────
+    fig1, ax1 = plt.subplots(figsize=(14, 6))
+    for m in METHODS:
+        df = value_dfs[m]
+        ax1.plot(df.index, df["value"] / INITIAL_CASH * 100,
+                 color=METHOD_COLORS[m], linewidth=1.2,
+                 label=f"{METHOD_LABELS[m]} — ¥{results[m]['final_value']:,.0f}")
+    ax1.axhline(100, color="gray", lw=0.5, ls="--", alpha=0.4)
+    ax1.set_title("三策略累计净值对比（2021–2025）", fontsize=14, fontweight="bold")
+    ax1.set_ylabel("净值（起点 = 100）")
+    ax1.legend(loc="upper left", fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
+    fig1.tight_layout()
+    fig1.savefig(os.path.join(ASSETS_DIR, "strategy-comparison.png"),
+                 dpi=150, bbox_inches="tight")
+    plt.close(fig1)
+    print(f"  ✓ assets/strategy-comparison.png")
+
+    # ── Chart 2: 风险平价权重演变 ────────────────────────────
+    if "risk-parity" in weight_dfs:
+        fig2, ax2 = plt.subplots(figsize=(14, 5))
+        df_w = weight_dfs["risk-parity"]
+        ax2.stackplot(df_w.index, df_w.T,
+                      labels=[SYMBOLS[c] for c in df_w.columns],
+                      colors=[SYMBOL_COLORS[c] for c in df_w.columns],
+                      alpha=0.75)
+        ax2.set_title("风险平价：每日权重演变", fontsize=14, fontweight="bold")
+        ax2.set_ylabel("权重")
+        ax2.set_ylim(0, 1)
+        ax2.legend(loc="upper left", fontsize=10)
+        ax2.grid(True, alpha=0.3, axis="y")
+        ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+        plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
+        fig2.tight_layout()
+        fig2.savefig(os.path.join(ASSETS_DIR, "risk-parity-weights.png"),
+                     dpi=150, bbox_inches="tight")
+        plt.close(fig2)
+        print(f"  ✓ assets/risk-parity-weights.png")
+
+    # ── Chart 3: 动量排名权重演变 ────────────────────────────
+    if "momentum-rank" in weight_dfs:
+        fig3, ax3 = plt.subplots(figsize=(14, 5))
+        df_w = weight_dfs["momentum-rank"]
+        ax3.stackplot(df_w.index, df_w.T,
+                      labels=[SYMBOLS[c] for c in df_w.columns],
+                      colors=[SYMBOL_COLORS[c] for c in df_w.columns],
+                      alpha=0.75)
+        ax3.set_title("动量排名：每日权重演变", fontsize=14, fontweight="bold")
+        ax3.set_ylabel("权重")
+        ax3.set_ylim(0, 1)
+        ax3.legend(loc="upper left", fontsize=10)
+        ax3.grid(True, alpha=0.3, axis="y")
+        ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+        ax3.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+        plt.setp(ax3.xaxis.get_majorticklabels(), rotation=45)
+        fig3.tight_layout()
+        fig3.savefig(os.path.join(ASSETS_DIR, "momentum-rank-weights.png"),
+                     dpi=150, bbox_inches="tight")
+        plt.close(fig3)
+        print(f"  ✓ assets/momentum-rank-weights.png")
+
+    # ── Chart 4: RAM 分数时间序列 ──────────────────────────────
+    fig4, ax4 = plt.subplots(figsize=(14, 5))
+    for sym, sym_name in SYMBOLS.items():
+        df = panel[sym].dropna(subset=["ram"])
+        ax4.plot(df.index, df["ram"], label=sym_name,
+                 color=SYMBOL_COLORS[sym], linewidth=0.8, alpha=0.8)
+    ax4.axhline(0, color="gray", lw=0.5, ls="--", alpha=0.4)
+    ax4.set_title("RAM 分数时间序列（20 日滚动）", fontsize=14, fontweight="bold")
+    ax4.set_ylabel("RAM")
+    ax4.legend(loc="upper left", fontsize=10)
+    ax4.grid(True, alpha=0.3)
+    ax4.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+    ax4.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    plt.setp(ax4.xaxis.get_majorticklabels(), rotation=45)
+    fig4.tight_layout()
+    fig4.savefig(os.path.join(ASSETS_DIR, "ram-time-series.png"),
+                 dpi=150, bbox_inches="tight")
+    plt.close(fig4)
+    print(f"  ✓ assets/ram-time-series.png")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 6. 主流程
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     print("=" * 70)
     print("  三资产组合分配：等权 vs 风险平价 vs 动量排名")
-    print(f"  时间范围: {START} ~ {END}  |  初始资金: {INITIAL_CASH:,.0f} 元")
-    print(f"  框架: backtrader")
+    print(f"  框架: backtrader  |  初始资金: ¥{INITIAL_CASH:,.0f}")
+    print(f"  时间: 2021–2025")
     print("=" * 70)
 
-    # ── 5a. 数据 ──
+    # ── 6a. 数据 ──
     print("\n▶ 获取数据 + 计算指标...")
     panel = build_panel()
     for sym, df in panel.items():
-        name = SYMBOLS[sym]
-        print(f"    {sym} ({name}): {len(df)} 交易日")
-        print(f"      mom 范围: [{df['mom'].min():+.6f}, {df['mom'].max():+.6f}]")
-        print(f"      vol 范围: [{df['vol'].min():.4f}, {df['vol'].max():.4f}]")
-        print(f"      ram 范围: [{df['ram'].min():+.4f}, {df['ram'].max():+.4f}]")
+        print(f"    {sym} ({SYMBOLS[sym]}): {len(df)} 交易日")
 
-    # ── 5b. 运行三个策略 ──
-    methods = ["equal-weight", "risk-parity", "momentum-rank"]
+    # ── 6b. 运行回测 ──
+    print("\n▶ 运行三个策略...")
     results = {}
+    for method in METHODS:
+        print(f"  ▶ {METHOD_LABELS[method]}...", end=" ")
+        results[method] = run_one(method, panel)
+        print(f"¥{results[method]['final_value']:>8,.0f}")
 
-    for method in methods:
-        print(f"\n▶ 运行「{method}」...")
-        cerebro = run_backtest(method, panel)
-        results[method] = cerebro
-
-        strat = cerebro.runstrats[0][0]
-        portfolio_value = cerebro.broker.getvalue()
-
-        ret = strat.analyzers.returns.get_analysis()
-        sharpe = strat.analyzers.sharpe.get_analysis()
-        dd = strat.analyzers.drawdown.get_analysis()
-
-        print(f"    完成  最终资产: ¥{portfolio_value:,.2f}")
-        results[method] = {
-            "cerebro": cerebro,
-            "final_value": portfolio_value,
-            "total_return": (portfolio_value / INITIAL_CASH) - 1,
-            "annual_return": ret.get("rnorm100", 0) / 100,
-            "sharpe": sharpe.get("sharperatio", 0),
-            "max_drawdown": dd.get("max", {}).get("drawdown", 0) / 100,
-        }
-
-    # ── 5c. 回测指标对比 ──
+    # ── 6c. 打印结果 ──
     print(f"\n{'='*70}")
     print("  回测指标对比")
     print(f"{'='*70}")
+    print(f"\n  {'指标':<14}", end="")
+    for m in METHODS:
+        print(f" {METHOD_LABELS[m]:>10}", end="")
+    print(f"\n  {'─'*48}")
+    for key, label, fmt in [
+        ("total_return", "累计收益率", "%"),
+        ("annual_return", "年化收益率", "%"),
+        ("max_drawdown", "最大回撤", "%"),
+        ("sharpe", "夏普比率", "f"),
+    ]:
+        print(f"  {label:<14}", end="")
+        for m in METHODS:
+            v = results[m][key]
+            print(f" {v:>10.2%}" if fmt == "%" else f" {v:>10.2f}", end="")
+        print()
 
-    print(f"\n  {'指标':<14} {'等权':>12} {'风险平价':>12} {'动量排名':>12}")
-    print(f"  {'─'*52}")
-    for metric in ["total_return", "annual_return", "max_drawdown", "sharpe"]:
-        labels = {
-            "total_return": "累计收益率",
-            "annual_return": "年化收益率",
-            "max_drawdown": "最大回撤",
-            "sharpe": "夏普比率",
-        }
-        row = f"  {labels[metric]:<14}"
-        for method in methods:
-            val = results[method][metric]
-            if metric == "sharpe":
-                row += f" {val:>12.2f}"
-            else:
-                row += f" {val:>12.2%}"
-        print(row)
+    # 最新一日权重
+    print(f"\n  {'─'*48}")
+    print(f"  {'标的':<10}", end="")
+    for m in METHODS:
+        print(f" {METHOD_LABELS[m]:>10}", end="")
+    print(f"\n  {'─'*48}")
+    for sym, sym_name in SYMBOLS.items():
+        print(f"  {sym_name:<10}", end="")
+        for m in METHODS:
+            print(f" {results[m]['history'][-1][2].get(sym, 0):>10.1%}", end="")
+        print()
 
-    # ── 5d. 最新一日权重 ──
-    print(f"\n{'='*70}")
-    print("  最新一日权重对比")
-    print(f"{'='*70}")
-
-    # 从 cerebro 获取最后一个 bar 的权重
-    # 由于 backtrader 不直接暴露目标权重，我们从策略中最后一天的 order 推断
-    # 这里用策略的 target_weights 是近似值
-    print(f"\n  {'标的':<10} {'等权':>12} {'风险平价':>12} {'动量排名':>12}")
-    print(f"  {'─'*48}")
-    for sym_name in ["沪深300", "纳指100", "黄金"]:
-        row = f"  {sym_name:<10}"
-        for method in methods:
-            # 从数据的最后一天取指标，用策略方法算出权重
-            cerebro = results[method]["cerebro"]
-            strat = cerebro.runstrats[0][0]
-            # 获取最后一个有效值
-            w = 0.0
-            # 遍历 datas 找对应 name
-            for d in strat.datas:
-                name = d._name
-                full_name = SYMBOLS[name]
-                if full_name == sym_name:
-                    if method == "equal-weight":
-                        w = 1.0 / 3
-                    elif method == "risk-parity":
-                        v = d.vol[0]
-                        if v and v > 0 and not np.isnan(v):
-                            w = (1.0 / v) / sum(1.0 / dd.vol[0] for dd in strat.datas
-                                               if dd.vol[0] and dd.vol[0] > 0 and not np.isnan(dd.vol[0]))
-                    elif method == "momentum-rank":
-                        ram = d.ram[0]
-                        if ram and ram > 0 and not np.isnan(ram):
-                            pos = {dd._name: dd.ram[0] for dd in strat.datas
-                                   if dd.ram[0] and dd.ram[0] > 0 and not np.isnan(dd.ram[0])}
-                            total = sum(pos.values())
-                            if total > 0:
-                                w = ram / total
-            row += f" {w:>12.1%}"
-        print(row)
-
-    # ── 5e. 动量排名：ram 快照 ──
-    print(f"\n▶ 动量排名最新 ram 分数:")
+    # RAM 快照
+    print(f"\n▶ 动量排名 — 最新 RAM 分数:")
     print(f"  {'标的':<10} {'mom':>12} {'vol':>12} {'ram':>12}")
     print(f"  {'─'*48}")
-    cerebro_mr = results["momentum-rank"]["cerebro"]
-    strat_mr = cerebro_mr.runstrats[0][0]
-    for d in strat_mr.datas:
+    for d in results["momentum-rank"]["history"]:
+        pass  # RAM 值在 cerebro 里，继续用 cerebro 方法
+    # 从 cerebro 获取
+    cerebro = bt.Cerebro()
+    for symbol, df in panel.items():
+        feed = ETFData(dataname=df)
+        feed._name = symbol
+        cerebro.adddata(feed)
+    cerebro.addstrategy(AssetAllocationStrategy, method="momentum-rank")
+    cerebro.broker.setcash(INITIAL_CASH)
+    cerebro.broker.setcommission(commission=0.0)
+    cerebro.run()
+    for d in cerebro.runstrats[0][0].datas:
         name = SYMBOLS[d._name]
-        mom = d.mom[0]
-        vol = d.vol[0]
-        ram = d.ram[0]
-        print(f"  {name:<10} {mom:>+12.6f} {vol:>12.4f} {ram:>+12.6f}")
+        print(f"  {name:<10} {d.mom[0]:>+12.6f} {d.vol[0]:>12.4f} {d.ram[0]:>+12.6f}")
+
+    # ── 6d. 生成图表 ──
+    print("\n▶ 生成图表...")
+    generate_charts(results, panel)
 
     print(f"\n  ✅ 完成")
