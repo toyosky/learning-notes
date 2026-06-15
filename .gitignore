@@ -14,3 +14,5 @@ Thumbs.db
 
 # Image backups
 *备份*
+site/
+.omo/
