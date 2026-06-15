@@ -153,9 +153,12 @@ class RiskParityWithStopLoss(bt.Strategy):
             self._stopped_etfs.clear()
             for d in self.datas:
                 self.order_target_percent(d, weights.get(d._name, 0.0))
-                pos = self.getposition(d)
-                if pos.size > 0:
-                    self._avg_costs[d._name] = pos.price
+
+        # 仓位存在但 avg_cost=0（止损后首次重建仓位）→ 从 pos.price 获取
+        for d in self.datas:
+            pos = self.getposition(d)
+            if pos.size > 0 and self._avg_costs.get(d._name, 0.0) == 0.0:
+                self._avg_costs[d._name] = pos.price
 
         # ── 记录历史 ──
         self.history.append((
