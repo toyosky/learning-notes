@@ -2,14 +2,18 @@
 """
 等权 / 风险平价 / 动量排名 — backtrader 实现。
 
-回测 + 图表生成。
-每根 bar 记录组合价值和权重历史，留作可视化使用。
+再平衡频率对比：每日、每5日、每10日、每月。
+佣金：0.1%，最低 5 元（A股 ETF 真实费率结构）。
+
+输出：
+  1. 控制台指标汇总表（3方法 × 4频率 = 12 组合）
+  2. assets/freq-compare-{method}.png  — 每策略一张净值对比图
+  3. assets/freq-summary-metrics.png   — 收益率 / 夏普 / 回撤 汇总柱状图
+  4. assets/freq-delta-from-daily.png  — 以每日为基准的净值差异图
 
 与数学推导的对应关系：
   - mom, vol, ram 的计算 → 见 momentum-ranking-derivation.md
   - 风险平价逻辑（RC 分解, w ∝ 1/σ）→ 见 risk-parity-derivation.md
-  - backtrader 框架概念 → 见 backtrader-intro.md
-  - 代码逐段讲解 → 见 bt-portfolio-allocation.md
 """
 
 import backtrader as bt
@@ -38,6 +42,16 @@ METHOD_COLORS = {
 SYMBOL_COLORS = {"510300": "#E53935", "513100": "#1E88E5", "518880": "#FDD835"}
 INITIAL_CASH = 100_000.0
 MOM_PERIOD = 20
+
+# ── 再平衡频率 ──
+REBALANCE_FREQS = [1, 5, 10, "monthly"]
+FREQ_LABELS = {1: "每日", 5: "每5日", 10: "每10日", "monthly": "每月"}
+FREQ_COLORS = {1: "#7f8c8d", 5: "#e67e22", 10: "#3498db", "monthly": "#2ecc71"}
+FREQ_LINESTYLES = {1: ":", 5: "--", 10: "-.", "monthly": "-"}
+
+# ── 佣金参数 ──
+COMMISSION_RATE = 0.001      # 0.1%
+MIN_COMMISSION = 5.0         # 最低 5 元
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -77,53 +91,91 @@ class ETFData(bt.feeds.PandasData):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 3. 策略（记录每日历史用于出图）
+# 3. 策略（支持再平衡频率参数）
 # ══════════════════════════════════════════════════════════════════
 
 class AssetAllocationStrategy(bt.Strategy):
-    """三合一策略，由 params.method 切换三种分配方式。"""
-    params = (("method", "equal-weight"),)
+    """三合一策略，由 params.method 切换分配方式，params.rebalance_freq 控制频率。
+
+    Parameters
+    ----------
+    method : str
+        "equal-weight" | "risk-parity" | "momentum-rank"
+    rebalance_freq : int | str
+        1=每日, 5=每5日, 10=每10日, "monthly"=每月
+    """
+    params = (
+        ("method", "equal-weight"),
+        ("rebalance_freq", 1),
+    )
 
     def __init__(self):
         self.history = []  # [(date_str, portfolio_value, {symbol: weight})]
+        self._bars_since_last_rebalance = 0
+        self._last_month = None
 
-    def next(self):
+    def _compute_weights(self) -> dict:
+        """根据 method 计算当 bar 的目标权重。"""
         vols, rams = {}, {}
         for d in self.datas:
             vols[d._name] = d.vol[0]
             rams[d._name] = d.ram[0]
 
         if self.params.method == "equal-weight":
-            weights = {name: 1.0 / len(SYMBOLS) for name in SYMBOLS}
+            n = len(SYMBOLS)
+            return {name: 1.0 / n for name in SYMBOLS}
         elif self.params.method == "risk-parity":
-            weights = self._risk_parity(vols)
-        else:
-            weights = self._momentum_rank(rams)
+            return self._risk_parity(vols)
+        else:  # momentum-rank
+            return self._momentum_rank(rams)
 
-        # 记录历史
+    def next(self):
+        freq = self.params.rebalance_freq
+
+        # ── 判断是否再平衡 ──
+        if freq == "monthly":
+            dt = self.datas[0].datetime.date(0)
+            should_rebalance = (
+                self._last_month is None or dt.month != self._last_month
+            )
+            self._last_month = dt.month
+        else:
+            should_rebalance = (self._bars_since_last_rebalance == 0)
+
+        # ── 计算目标权重（每根 bar 都算，用于记录） ──
+        weights = self._compute_weights()
+
+        # ── 记录历史（每天记录，无论是否调仓） ──
         self.history.append((
             self.datas[0].datetime.date(0).isoformat(),
             self.broker.getvalue(),
             dict(weights),
         ))
 
-        # 调仓
-        for d in self.datas:
-            self.order_target_percent(d, weights.get(d._name, 0.0))
+        # ── 执行再平衡 ──
+        if should_rebalance:
+            for d in self.datas:
+                self.order_target_percent(d, weights.get(d._name, 0.0))
+
+        # ── 更新计数器 ──
+        self._bars_since_last_rebalance += 1
+        if isinstance(freq, int) and self._bars_since_last_rebalance >= freq:
+            self._bars_since_last_rebalance = 0
 
     @staticmethod
-    def _risk_parity(vols):
+    def _risk_parity(vols: dict) -> dict:
         """w_i ∝ 1/σ_i  ← risk-parity-derivation.md §5.2"""
         clean = {k: v for k, v in vols.items()
                  if v is not None and v > 0 and not np.isnan(v)}
         if not clean:
-            return {name: 1.0 / len(SYMBOLS) for name in SYMBOLS}
+            n = len(SYMBOLS)
+            return {name: 1.0 / n for name in SYMBOLS}
         inv = {k: 1.0 / v for k, v in clean.items()}
         total = sum(inv.values())
         return {k: inv[k] / total for k in inv}
 
     @staticmethod
-    def _momentum_rank(rams):
+    def _momentum_rank(rams: dict) -> dict:
         """w_i = ram_i⁺ / sum(ram⁺)  ← momentum-ranking-derivation.md §7"""
         pos = {k: v for k, v in rams.items()
                if v is not None and v > 0 and not np.isnan(v)}
@@ -137,17 +189,27 @@ class AssetAllocationStrategy(bt.Strategy):
 # 4. 回测运行器
 # ══════════════════════════════════════════════════════════════════
 
-def run_one(method: str, data_panel: dict[str, pd.DataFrame]) -> dict:
-    """运行单个策略。返回结果字典（含 history 列表）。"""
+def run_one(method: str, freq, data_panel: dict[str, pd.DataFrame]) -> dict:
+    """运行单个策略 × 频率组合。返回结果字典。"""
     cerebro = bt.Cerebro()
     for symbol, df in data_panel.items():
         feed = ETFData(dataname=df)
         feed._name = symbol
         cerebro.adddata(feed)
 
-    cerebro.addstrategy(AssetAllocationStrategy, method=method)
+    cerebro.addstrategy(AssetAllocationStrategy, method=method, rebalance_freq=freq)
     cerebro.broker.setcash(INITIAL_CASH)
-    cerebro.broker.setcommission(commission=0.0)
+
+    # 佣金：0.1%，最低 5 元（A股 ETF 真实费率结构）
+    class MinCommCommission(bt.CommInfoBase):
+        params = (
+            ("commission", COMMISSION_RATE),
+            ("commtype", bt.CommInfoBase.COMM_PERC),
+            ("percabs", True),
+            ("stocklike", True),
+            ("min_commission", MIN_COMMISSION),
+        )
+    cerebro.broker.addcommissioninfo(MinCommCommission())
 
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe",
@@ -172,7 +234,7 @@ def run_one(method: str, data_panel: dict[str, pd.DataFrame]) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════
-# 5. 可视化
+# 5. 可视化 — 频率对比图
 # ══════════════════════════════════════════════════════════════════
 
 def _init_mpl():
@@ -185,112 +247,173 @@ def _init_mpl():
     return plt, mdates
 
 
-def generate_charts(results: dict[str, dict], panel: dict[str, pd.DataFrame]):
-    """生成 4 张图，保存到 assets/。"""
+def generate_frequency_charts(results: dict, panel: dict[str, pd.DataFrame]):
+    """生成三类图表，保存到 assets/。
+
+    1. 每策略一张净值对比图（3 张）
+    2. 汇总柱状图（收益率 / 夏普 / 回撤）
+    3. 差异图（以每日为基准的净值差）
+    """
     plt, mdates = _init_mpl()
     os.makedirs(ASSETS_DIR, exist_ok=True)
 
-    # ── 整理数据 ──
-    value_dfs = {}
-    weight_dfs = {}
-    for m in METHODS:
-        recs_v = [{"date": h[0], "value": h[1]} for h in results[m]["history"]]
-        value_dfs[m] = pd.DataFrame(recs_v).set_index("date")
-        value_dfs[m].index = pd.to_datetime(value_dfs[m].index)
-
-        if m != "equal-weight":
-            recs_w = [{"date": h[0], **h[2]} for h in results[m]["history"]]
-            df_w = pd.DataFrame(recs_w).set_index("date")
-            df_w.index = pd.to_datetime(df_w.index)
-            for s in ("510300", "513100", "518880"):
-                if s not in df_w.columns:
-                    df_w[s] = 0.0
-            weight_dfs[m] = df_w[["510300", "513100", "518880"]]
-
-    # ── Chart 1: 累计净值对比 ──────────────────────────────────
-    fig1, ax1 = plt.subplots(figsize=(14, 6))
-    for m in METHODS:
-        df = value_dfs[m]
-        ax1.plot(df.index, df["value"] / INITIAL_CASH * 100,
-                 color=METHOD_COLORS[m], linewidth=1.2,
-                 label=f"{METHOD_LABELS[m]} — ¥{results[m]['final_value']:,.0f}")
-    ax1.axhline(100, color="gray", lw=0.5, ls="--", alpha=0.4)
-    ax1.set_title("三策略累计净值对比（2021–2025）", fontsize=14, fontweight="bold")
-    ax1.set_ylabel("净值（起点 = 100）")
-    ax1.legend(loc="upper left", fontsize=10)
-    ax1.grid(True, alpha=0.3)
-    ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
-    fig1.tight_layout()
-    fig1.savefig(os.path.join(ASSETS_DIR, "strategy-comparison.png"),
-                 dpi=150, bbox_inches="tight")
-    plt.close(fig1)
-    print(f"  ✓ assets/strategy-comparison.png")
-
-    # ── Chart 2: 风险平价权重演变 ────────────────────────────
-    if "risk-parity" in weight_dfs:
-        fig2, ax2 = plt.subplots(figsize=(14, 5))
-        df_w = weight_dfs["risk-parity"]
-        ax2.stackplot(df_w.index, df_w.T,
-                      labels=[SYMBOLS[c] for c in df_w.columns],
-                      colors=[SYMBOL_COLORS[c] for c in df_w.columns],
-                      alpha=0.75)
-        ax2.set_title("风险平价：每日权重演变", fontsize=14, fontweight="bold")
-        ax2.set_ylabel("权重")
+    # ──────────────────────────────────────────────────────
+    # Chart 1-3: 频率对比（每策略一张）
+    # ──────────────────────────────────────────────────────
+    for method in METHODS:
+        fig, ax = plt.subplots(figsize=(14, 6))
+        ax2 = ax.twinx()
         ax2.set_ylim(0, 1)
-        ax2.legend(loc="upper left", fontsize=10)
-        ax2.grid(True, alpha=0.3, axis="y")
-        ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-        plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-        fig2.tight_layout()
-        fig2.savefig(os.path.join(ASSETS_DIR, "risk-parity-weights.png"),
-                     dpi=150, bbox_inches="tight")
-        plt.close(fig2)
-        print(f"  ✓ assets/risk-parity-weights.png")
+        ax2.set_ylabel("现金仓位", fontsize=9, color="gray")
+        ax2.tick_params(axis="y", colors="gray")
 
-    # ── Chart 3: 动量排名权重演变 ────────────────────────────
-    if "momentum-rank" in weight_dfs:
-        fig3, ax3 = plt.subplots(figsize=(14, 5))
-        df_w = weight_dfs["momentum-rank"]
-        ax3.stackplot(df_w.index, df_w.T,
-                      labels=[SYMBOLS[c] for c in df_w.columns],
-                      colors=[SYMBOL_COLORS[c] for c in df_w.columns],
-                      alpha=0.75)
-        ax3.set_title("动量排名：每日权重演变", fontsize=14, fontweight="bold")
-        ax3.set_ylabel("权重")
-        ax3.set_ylim(0, 1)
-        ax3.legend(loc="upper left", fontsize=10)
-        ax3.grid(True, alpha=0.3, axis="y")
-        ax3.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
-        ax3.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-        plt.setp(ax3.xaxis.get_majorticklabels(), rotation=45)
-        fig3.tight_layout()
-        fig3.savefig(os.path.join(ASSETS_DIR, "momentum-rank-weights.png"),
-                     dpi=150, bbox_inches="tight")
-        plt.close(fig3)
-        print(f"  ✓ assets/momentum-rank-weights.png")
+        for freq in REBALANCE_FREQS:
+            recs = results[method][freq]["history"]
+            df = pd.DataFrame([{"date": r[0], "value": r[1]} for r in recs])
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date")
 
-    # ── Chart 4: RAM 分数时间序列 ──────────────────────────────
-    fig4, ax4 = plt.subplots(figsize=(14, 5))
-    for sym, sym_name in SYMBOLS.items():
-        df = panel[sym].dropna(subset=["ram"])
-        ax4.plot(df.index, df["ram"], label=sym_name,
-                 color=SYMBOL_COLORS[sym], linewidth=0.8, alpha=0.8)
-    ax4.axhline(0, color="gray", lw=0.5, ls="--", alpha=0.4)
-    ax4.set_title("RAM 分数时间序列（20 日滚动）", fontsize=14, fontweight="bold")
-    ax4.set_ylabel("RAM")
-    ax4.legend(loc="upper left", fontsize=10)
-    ax4.grid(True, alpha=0.3)
-    ax4.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
-    ax4.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-    plt.setp(ax4.xaxis.get_majorticklabels(), rotation=45)
-    fig4.tight_layout()
-    fig4.savefig(os.path.join(ASSETS_DIR, "ram-time-series.png"),
-                 dpi=150, bbox_inches="tight")
-    plt.close(fig4)
-    print(f"  ✓ assets/ram-time-series.png")
+            line, = ax.plot(
+                df.index, df["value"] / INITIAL_CASH * 100,
+                color=FREQ_COLORS[freq],
+                linestyle=FREQ_LINESTYLES[freq],
+                linewidth=1.3,
+                label=(
+                    f"{FREQ_LABELS[freq]} — "
+                    f"¥{results[method][freq]['final_value']:,.0f}  "
+                    f"({results[method][freq]['total_return']:+.1%})"
+                ),
+            )
+
+        ax.axhline(100, color="gray", lw=0.5, ls="--", alpha=0.4)
+        ax.set_title(
+            f"{METHOD_LABELS[method]} | 不同再平衡频率对比\n"
+            f"佣金 {COMMISSION_RATE:.1%} 最低 ¥{MIN_COMMISSION:.0f}",
+            fontsize=13, fontweight="bold", linespacing=1.4,
+        )
+        ax.set_ylabel("净值（起点 = 100）")
+        # Legend outside on the right
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0, box.width * 0.78, box.height])
+        ax.legend(loc="upper left", fontsize=10, bbox_to_anchor=(1.02, 1))
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+
+        fig.tight_layout()
+        fig.savefig(
+            os.path.join(ASSETS_DIR, f"freq-compare-{method}.png"),
+            dpi=150, bbox_inches="tight",
+        )
+        plt.close(fig)
+        print(f"  ✓ assets/freq-compare-{method}.png")
+
+    # ──────────────────────────────────────────────────────
+    # Chart 4: 汇总柱状图 — 收益率 / 夏普 / 回撤
+    # ──────────────────────────────────────────────────────
+    fig_bar, (ax_fv, ax_sr, ax_dd) = plt.subplots(1, 3, figsize=(16, 5))
+
+    x = np.arange(len(METHODS))
+    width = 0.2
+    for i, freq in enumerate(REBALANCE_FREQS):
+        fv = [results[m][freq]["total_return"] for m in METHODS]
+        sr = [results[m][freq]["sharpe"] for m in METHODS]
+        dd = [results[m][freq]["max_drawdown"] for m in METHODS]
+        offset = (i - 1.5) * width
+
+        ax_fv.bar(x + offset, fv, width, label=FREQ_LABELS[freq],
+                  color=FREQ_COLORS[freq], alpha=0.8)
+        ax_sr.bar(x + offset, sr, width, label=FREQ_LABELS[freq],
+                  color=FREQ_COLORS[freq], alpha=0.8)
+        ax_dd.bar(x + offset, dd, width, label=FREQ_LABELS[freq],
+                  color=FREQ_COLORS[freq], alpha=0.8)
+
+    for ax, title in [
+        (ax_fv, "累计收益率"),
+        (ax_sr, "夏普比率"),
+        (ax_dd, "最大回撤"),
+    ]:
+        ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels([METHOD_LABELS[m] for m in METHODS], fontsize=10)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3, axis="y")
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+
+    fig_bar.suptitle(
+        f"再平衡频率 vs 佣金 {COMMISSION_RATE:.1%} 最低 ¥{MIN_COMMISSION:.0f}",
+        fontsize=14, fontweight="bold",
+    )
+    fig_bar.tight_layout()
+    fig_bar.savefig(
+        os.path.join(ASSETS_DIR, "freq-summary-metrics.png"),
+        dpi=150, bbox_inches="tight",
+    )
+    plt.close(fig_bar)
+    print(f"  ✓ assets/freq-summary-metrics.png")
+
+    # ──────────────────────────────────────────────────────
+    # Chart 5: 差异图 — 以每日再平衡为基准
+    # ──────────────────────────────────────────────────────
+    fig_delta, axes = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+
+    for idx, method in enumerate(METHODS):
+        ax = axes[idx]
+        baseline = results[method][1]  # daily baseline
+
+        for freq in [5, 10, "monthly"]:
+            recs = results[method][freq]["history"]
+            df = pd.DataFrame([{"date": r[0], "value": r[1]} for r in recs])
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date")
+
+            base_df = pd.DataFrame(
+                [{"date": r[0], "value": r[1]} for r in baseline["history"]]
+            )
+            base_df["date"] = pd.to_datetime(base_df["date"])
+            base_df = base_df.set_index("date")
+
+            common = df.index.intersection(base_df.index)
+            diff = (df.loc[common, "value"] - base_df.loc[common, "value"]) \
+                   / INITIAL_CASH * 100
+
+            ax.plot(
+                common, diff,
+                color=FREQ_COLORS[freq],
+                linestyle=FREQ_LINESTYLES[freq],
+                linewidth=0.9,
+                label=f"{FREQ_LABELS[freq]} — 每日",
+            )
+            # 标注终值差异
+            final_diff = diff.iloc[-1]
+            ax.annotate(
+                f"{final_diff:+.2f}pp",
+                xy=(common[-1], final_diff),
+                xytext=(5, 5), textcoords="offset points",
+                fontsize=9, color=FREQ_COLORS[freq], fontweight="bold",
+            )
+
+        ax.axhline(0, color="gray", lw=0.5)
+        ax.set_title(METHOD_LABELS[method], fontsize=12, fontweight="bold")
+        ax.set_ylabel("净值差异（百分点）")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=6))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+
+    fig_delta.suptitle(
+        "差异图：不同频率 vs 每日再平衡（净值百分点差）",
+        fontsize=14, fontweight="bold",
+    )
+    fig_delta.tight_layout()
+    fig_delta.savefig(
+        os.path.join(ASSETS_DIR, "freq-delta-from-daily.png"),
+        dpi=150, bbox_inches="tight",
+    )
+    plt.close(fig_delta)
+    print(f"  ✓ assets/freq-delta-from-daily.png")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -298,11 +421,12 @@ def generate_charts(results: dict[str, dict], panel: dict[str, pd.DataFrame]):
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("=" * 70)
-    print("  三资产组合分配：等权 vs 风险平价 vs 动量排名")
-    print(f"  框架: backtrader  |  初始资金: ¥{INITIAL_CASH:,.0f}")
-    print(f"  时间: 2021–2025")
-    print("=" * 70)
+    print("=" * 72)
+    print("  再平衡频率对比研究")
+    print(f"  框架: backtrader  |  初始资金: ¥{INITIAL_CASH:,.0f}  |  时间: 2021–2025")
+    print(f"  佣金: {COMMISSION_RATE:.1%}  最低 ¥{MIN_COMMISSION:.0f}")
+    print(f"  频率: {' / '.join(str(FREQ_LABELS[f]) for f in REBALANCE_FREQS)}")
+    print("=" * 72)
 
     # ── 6a. 数据 ──
     print("\n▶ 获取数据 + 计算指标...")
@@ -310,68 +434,50 @@ if __name__ == "__main__":
     for sym, df in panel.items():
         print(f"    {sym} ({SYMBOLS[sym]}): {len(df)} 交易日")
 
-    # ── 6b. 运行回测 ──
-    print("\n▶ 运行三个策略...")
-    results = {}
+    # ── 6b. 运行回测（3 方法 × 4 频率 = 12 个） ──
+    print("\n▶ 运行回测...")
+    results: dict[str, dict] = {}
     for method in METHODS:
-        print(f"  ▶ {METHOD_LABELS[method]}...", end=" ")
-        results[method] = run_one(method, panel)
-        print(f"¥{results[method]['final_value']:>8,.0f}")
+        results[method] = {}
+        for freq in REBALANCE_FREQS:
+            label = f"{METHOD_LABELS[method]} · {FREQ_LABELS[freq]}"
+            print(f"  ▶ {label:>14}...", end=" ")
+            sys.stdout.flush()
+            results[method][freq] = run_one(method, freq, panel)
+            r = results[method][freq]
+            print(
+                f"¥{r['final_value']:>8,.0f}  "
+                f"({r['total_return']:+>+7.2%})  "
+                f"夏普 {r['sharpe']:.2f}  "
+                f"回撤 {r['max_drawdown']:.2%}"
+            )
 
-    # ── 6c. 打印结果 ──
-    print(f"\n{'='*70}")
-    print("  回测指标对比")
-    print(f"{'='*70}")
-    print(f"\n  {'指标':<14}", end="")
-    for m in METHODS:
-        print(f" {METHOD_LABELS[m]:>10}", end="")
-    print(f"\n  {'─'*48}")
-    for key, label, fmt in [
-        ("total_return", "累计收益率", "%"),
-        ("annual_return", "年化收益率", "%"),
-        ("max_drawdown", "最大回撤", "%"),
-        ("sharpe", "夏普比率", "f"),
-    ]:
-        print(f"  {label:<14}", end="")
-        for m in METHODS:
-            v = results[m][key]
-            print(f" {v:>10.2%}" if fmt == "%" else f" {v:>10.2f}", end="")
+    # ── 6c. 结果汇总表 ──
+    print(f"\n{'=' * 95}")
+    print("  指标汇总")
+    print(f"{'=' * 95}")
+    header = (
+        f"  {'方法':<14} {'频率':<8} {'最终值':>10} {'累计收益':>10} "
+        f"{'年化收益':>10} {'最大回撤':>10} {'夏普':>8}"
+    )
+    print(header)
+    print(f"  {'─' * 75}")
+    for method in METHODS:
+        for freq in REBALANCE_FREQS:
+            r = results[method][freq]
+            print(
+                f"  {METHOD_LABELS[method]:<14}"
+                f" {FREQ_LABELS[freq]:<8}"
+                f" ¥{r['final_value']:>8,.0f}"
+                f" {r['total_return']:>+9.2%}"
+                f" {r['annual_return']:>9.2%}"
+                f" {r['max_drawdown']:>9.2%}"
+                f" {r['sharpe']:>7.2f}"
+            )
         print()
-
-    # 最新一日权重
-    print(f"\n  {'─'*48}")
-    print(f"  {'标的':<10}", end="")
-    for m in METHODS:
-        print(f" {METHOD_LABELS[m]:>10}", end="")
-    print(f"\n  {'─'*48}")
-    for sym, sym_name in SYMBOLS.items():
-        print(f"  {sym_name:<10}", end="")
-        for m in METHODS:
-            print(f" {results[m]['history'][-1][2].get(sym, 0):>10.1%}", end="")
-        print()
-
-    # RAM 快照
-    print(f"\n▶ 动量排名 — 最新 RAM 分数:")
-    print(f"  {'标的':<10} {'mom':>12} {'vol':>12} {'ram':>12}")
-    print(f"  {'─'*48}")
-    for d in results["momentum-rank"]["history"]:
-        pass  # RAM 值在 cerebro 里，继续用 cerebro 方法
-    # 从 cerebro 获取
-    cerebro = bt.Cerebro()
-    for symbol, df in panel.items():
-        feed = ETFData(dataname=df)
-        feed._name = symbol
-        cerebro.adddata(feed)
-    cerebro.addstrategy(AssetAllocationStrategy, method="momentum-rank")
-    cerebro.broker.setcash(INITIAL_CASH)
-    cerebro.broker.setcommission(commission=0.0)
-    cerebro.run()
-    for d in cerebro.runstrats[0][0].datas:
-        name = SYMBOLS[d._name]
-        print(f"  {name:<10} {d.mom[0]:>+12.6f} {d.vol[0]:>12.4f} {d.ram[0]:>+12.6f}")
 
     # ── 6d. 生成图表 ──
-    print("\n▶ 生成图表...")
-    generate_charts(results, panel)
+    print("▶ 生成图表...")
+    generate_frequency_charts(results, panel)
 
-    print(f"\n  ✅ 完成")
+    print(f"\n  ✅ 完成。图表已保存到 assets/ 目录。")
