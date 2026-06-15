@@ -206,10 +206,12 @@ filter_negative=True → 激活阶跃函数在 ram = 0 处：
 1. **动量持续性假设**：$\operatorname{ram}_t$ 预测 $\operatorname{ram}_{t+1}$ 的前提是动量因子在时间上自相关。如果市场风格切换（动量因子崩溃，如 2009 年 3 月的美国市场），RAM 排名会给出完全相反的信号。
 2. **横截面独立性假设**：各资产 ram 分数被视为独立，但实际中资产间的相关性会导致同一时期多个资产同时具有正 ram（或负 ram），排名优化器无法处理这种集中度的风险——它只按分数排序，不看仓位之间的相关性。
 3. **估计误差的非线性传播**：设真实波动率为 $\sigma^*$，估计值为 $\hat{\sigma} = \sigma^* + \varepsilon$，则：
-   $$
-   \widehat{\operatorname{ram}} = \frac{\operatorname{mom}}{\hat{\sigma}} = \frac{\operatorname{mom}}{\sigma^*} \cdot \frac{1}{1 + \varepsilon / \sigma^*} \approx \operatorname{ram}^* \left(1 - \frac{\varepsilon}{\sigma^*}\right)
-   $$
-   当 $\sigma^*$ 本身很小（低波动环境）时，$\varepsilon / \sigma^*$ 被放大，RAM 估计的噪声极大。
+
+$$
+\widehat{\operatorname{ram}} = \frac{\operatorname{mom}}{\hat{\sigma}} = \frac{\operatorname{mom}}{\sigma^*} \cdot \frac{1}{1 + \varepsilon / \sigma^*} \approx \operatorname{ram}^* \left(1 - \frac{\varepsilon}{\sigma^*}\right)
+$$
+
+当 $\sigma^*$ 本身很小（低波动环境）时，$\varepsilon / \sigma^*$ 被放大，RAM 估计的噪声极大。
 4. **参数敏感性**：$N=20$ 是经验值。当 $N$ 过小时，ram 被短期噪声主导；过大时，ram 对趋势变化的响应滞后。且在 $N$ 较小的极端情况下，$\operatorname{vol}_t(N)$ 的自由度过低导致估计方差爆炸。
 5. **非平稳性**：$\operatorname{ram}_t$ 不是一个平稳过程。在趋势市场中 ram 持续为正，在震荡市场中 ram 围绕 0 摆动。用历史 ram 预测未来 ram 在制度切换时失效。
 
