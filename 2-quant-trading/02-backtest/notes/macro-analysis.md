@@ -115,6 +115,6 @@ df.loc[df.index < '2022-01-14', '纳指100'] /= 5
 
 ## 相关笔记
 
-- [[01-data/notes/akshare-basics|akshare 数据获取]]
-- [[01-data/deep/forward-vs-backward-adjustment|前复权 vs 后复权]]
-- [[02-backtest/notes/dca-backtest|DCA 定投回测]]
+- [[../../01-data/notes/akshare-basics|akshare 数据获取]]
+- [[../../01-data/deep/forward-vs-backward-adjustment|前复权 vs 后复权]]
+- [[dca-backtest|DCA 定投回测]]
