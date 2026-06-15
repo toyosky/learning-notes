@@ -42,17 +42,20 @@ date: 2026-06-14
 | [[02-backtest/notes/dca-backtest\|DCA 定投回测]] | 定投 + 均线择时策略回测 |
 | [[02-backtest/notes/ma-crossover-oxq\|oxq 均线交叉策略]] | 用 open-xquant 框架做 SMA 交叉策略回测 |
 | [[02-backtest/notes/macro-analysis\|三资产宏观分析]] | 沪深300/纳指100/黄金 相关性 + 组合回测 |
+| [[02-backtest/notes/portfolio-allocation\|组合分配：等权 vs 风险平价 vs 动量排名]] | 三种分配方法系统性对比 |
 
 ---
 
 ## 学习路线
 
 ```
-数据获取 → 简单策略 → 框架使用 → 进阶策略 → 宏观分析
-   ↓           ↓           ↓           ↓
-akshare     DCA定投      oxq框架    均线策略
-   ↓                                       ↓
-复权概念                              三资产组合配置
+数据获取 → 简单策略 → 框架使用 → 进阶策略 → 宏观分析 → 组合分配
+   ↓           ↓           ↓           ↓           ↓
+akshare     DCA定投      oxq框架    均线策略    三资产组合
+   ↓                                       ↓           ↓
+复权概念                              等权组合    风险平价
+   ↓
+动量排名
 ```
 
 ---
@@ -67,6 +70,7 @@ akshare     DCA定投      oxq框架    均线策略
 | `etf_comparison.py` | 02-backtest/code/ |
 | `generate_charts.py` | 02-backtest/code/ |
 | `macro_analysis.py` | 02-backtest/code/ |
+| `risk_parity.py` | 02-backtest/code/ |
 | `etf_comparison_300_nasdaq.py` | 02-backtest/code/ |
 
 ---
@@ -77,3 +81,4 @@ akshare     DCA定投      oxq框架    均线策略
 - [ ] 回测框架对比（oxq vs backtrader vs vnpy）
 - [ ] 实盘接入
 - [ ] 风险管理
+- [ ] 更多组合分配方法（均值-方差、动量加权）
