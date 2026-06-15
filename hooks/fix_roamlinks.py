@@ -78,6 +78,10 @@ def _fix_rl_call(self, match):
     # Strip .md suffix so mkdocs renders a clean URL path
     if rel_link_url.endswith(".md"):
         rel_link_url = rel_link_url[:-3]
+    # MkDocs page URLs are one level deeper than source file directories
+    # (page.md → page/index.html). Adjust relative paths by prepending ../.
+    if rel_link_url and not rel_link_url.startswith("#") and not rel_link_url.startswith("http"):
+        rel_link_url = os.path.normpath("../" + rel_link_url)
     # Add trailing slash for directory-based URLs so GitHub Pages serves index.html
     if rel_link_url and not rel_link_url.endswith("/") and not rel_link_url.startswith("#"):
         if "/" in rel_link_url and "." not in os.path.basename(rel_link_url.split("#")[0]):
