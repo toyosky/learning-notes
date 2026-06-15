@@ -108,14 +108,14 @@ $$
 
 **当 $\rho \neq 0$** 时，上述等式变为一个非线性方程组，无封闭解，需要数值求解（通常用牛顿法或 SQP 优化）。
 
-#### `RiskParityOptimizer` 的实现等价于什么？
+#### `_risk_parity()` 的实现等价于什么？
 
-`RiskParityOptimizer(volatility_col="vol")` 的代码是：
+`AssetAllocationStrategy._risk_parity()` 的代码是：
 
 ```python
-inv_vols[symbol] = 1.0 / vol
-total = sum(inv_vols.values())
-return {symbol: iv / total for symbol, iv in inv_vols.items()}
+inv = {k: 1.0 / v for k, v in vols.items() if v and v > 0}
+total = sum(inv.values())
+weights = {k: inv[k] / total for k in inv}
 ```
 
 这等价于在 **假设 $\rho = 0$** 的前提下求解 $w_i \propto 1/\sigma_i$。这是风险平价的零阶近似。
@@ -225,7 +225,7 @@ $$
 
 ## 代码实现：backtrader 版本
 
-回测框架从 oxq 换成了 **backtrader**（Python 最主流通用回测框架）。
+回测框架使用 **backtrader**（Python 最主流通用回测框架）。
 完整代码见 `02-backtest/code/risk_parity.py`，逐段讲解见 [[../deep/bt-portfolio-allocation]]。
 
 ### 设计思想
@@ -309,8 +309,8 @@ for method in ["equal-weight", "risk-parity", "momentum-rank"]:
 
 ### 回测指标对比
 
-> 以下为 backtrader 回测结果。与上一版 oxq 结果的收益率差异在 1-2% 以内（归因于订单执行模型不同：oxq 在当前 bar close 成交，backtrader 在下一 bar open 成交）。权重和排名完全一致。
-
+> 回测框架：backtrader。订单在下一 bar open 成交，与理想化的 close 成交略有差异。
+ 
 | 指标 | 等权 | 风险平价 | **动量排名** |
 |------|------|---------|------------|
 | **累计收益率** | +76.43% | +89.51% | **+133.98%** |

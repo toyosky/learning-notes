@@ -416,13 +416,13 @@ $$
 2. **SQP**（Sequential Quadratic Programming）：把非线性约束逐步线性化，每步解一个二次规划
 3. **Cyclical Coordinate Descent**：轮流固定其他变量，解一个变量的方程——实现简单，对风险平价问题特别有效
 
-我们的 `RiskParityOptimizer` 没有用这些数值方法——它走的是 $\rho=0$ 的简化。下一节解释原因。
+当前代码中的简化实现（`_risk_parity()` 方法）没有用这些数值方法——它走的是 $\rho=0$ 的简化。下一节解释原因。
 
 ---
 
 ## 8. 回头看：波动率倒数是零阶近似
 
-### 8.1 我们的优化器做了什么
+### 8.1 我们的简化实现做了什么
 
 ```python
 inv_vols[symbol] = 1.0 / vol

@@ -287,30 +287,20 @@ if excess > 0:
 
 ---
 
-## 第 5 块：backtrader 指标计算 vs 推导的差异
+## 第 5 块：backtrader 指标计算说明
 
 ### `backtrader.analyzers.SharpeRatio`
 
-oxq 版本用的 `result.sharpe_ratio()`，backtrader 版本用的 `bt.analyzers.SharpeRatio`。
+`bt.analyzers.SharpeRatio` 的默认参数：
+- 年化因子：252（交易日）
+- 无风险利率：通过 `riskfreerate` 参数传入（默认 0）
+- 使用对数收益率还是简单收益率：框架默认
 
-两者的夏普比率计算方式可能导致数值差异：
-- 年化方式（252 vs 365？）
-- 无风险利率处理（减法还是除法？）
-- 有无偏校正？
+三个策略使用相同的 analyzer 配置，所以夏普比率的**相对排名**是可靠的（动量排名 > 风险平价 > 等权）。
 
-在我们的输出中，夏普比率数值不一致（oxq 约 1.06-1.44，bt 约 0.65-1.10），是因为两个框架的默认算法不同。
+### 订单执行模型
 
-**关键**：这不是代码逻辑的问题——三个策略的**相对排名**完全一致（动量排名 > 风险平价 > 等权）。
-
-### 收益率差异来源
-
-| 因素 | oxq | backtrader |
-|------|-----|-----------|
-| 执行价格 | 收盘价（当前 bar） | 开盘价（下一 bar） |
-| 订单模型 | 理想化（立即成交） | order_target_percent 仿真 |
-| 现金管理 | 自动 | 自动 |
-
-oxq 的模拟更理想化（在 close 价格立即交易），backtrader 更保守（下一根 bar 的 open 成交），所以回测收益略有差异。这属于正常范围。
+`order_target_percent` 在下一根 bar 的开盘价成交（`open` 价格），这是 backtrader 的默认行为。这意味着回测收益比理想化的"当前 bar 收盘价成交"略低 1-2%，但更接近实盘。
 
 ---
 
