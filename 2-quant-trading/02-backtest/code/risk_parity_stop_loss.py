@@ -1,18 +1,7 @@
 #!/usr/bin/env python3
 """
-止损保护研究 — 基于风险平价 + 每月再平衡。
-
-风险平价永远满仓的特性，面对大跌时同样"只能眼睁睁看着跌"。
-加入回撤止损规则：当组合从峰值回撤超过阈值时，全仓切换到现金，
-等待下一个再平衡日重新入场。
-
-对比方案：
-  - 无止损失（baseline）
-  - 5% 回撤触发止损
-  - 10% 回撤触发止损
-  - 15% 回撤触发止损
-
-佣金：0.1%，最低 5 元。
+止损 + 止盈保护研究 — 基于风险平价 + 每月再平衡。
+对比 5% 止损、5% 止损 + 10%/20% 止盈、纯止盈的效果。
 """
 
 import backtrader as bt
@@ -32,14 +21,24 @@ MOM_PERIOD = 20
 COMMISSION_RATE = 0.001
 MIN_COMMISSION = 5.0
 
-STOP_LOSS_CONFIGS = [
-    ("none",   None,  "无止损失"),
-    ("pct_5",  0.05,  "5% 止损"),
-    ("pct_10", 0.10, "10% 止损"),
-    ("pct_15", 0.15, "15% 止损"),
+CONFIGS = [
+    ("none",         None,  None,  "无止损失"),
+    ("sl_5",         0.05,  None,  "5% 止损"),
+    ("sl_5_tp_10",   0.05,  0.10,  "止5%+盈10%"),
+    ("sl_5_tp_20",   0.05,  0.20,  "止5%+盈20%"),
+    ("tp_10",        None,  0.10,  "10%止盈"),
+    ("tp_20",        None,  0.20,  "20%止盈"),
 ]
-SL_COLORS = {"none": "#2196F3", "pct_5": "#e67e22", "pct_10": "#e74c3c", "pct_15": "#9b59b6"}
-SL_LINESTYLES = {"none": "-", "pct_5": "--", "pct_10": "-.", "pct_15": ":"}
+CFG_COLORS = {
+    "none": "#2196F3", "sl_5": "#e67e22",
+    "sl_5_tp_10": "#2ecc71", "sl_5_tp_20": "#27ae60",
+    "tp_10": "#9b59b6", "tp_20": "#8e44ad",
+}
+CFG_LINESTYLES = {
+    "none": "-", "sl_5": "--",
+    "sl_5_tp_10": "-.", "sl_5_tp_20": ":",
+    "tp_10": "--", "tp_20": "-.",
+}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -73,38 +72,25 @@ class ETFData(bt.feeds.PandasData):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 3. 策略 — 风险平价 + 可配置回撤止损（每月再平衡）
+# 3. 策略 — 风险平价 + 可配置止损/止盈（每月再平衡）
 # ══════════════════════════════════════════════════════════════════
 
 class RiskParityWithStopLoss(bt.Strategy):
-    """风险平价 + 单 ETF 止损。
-
-    每只 ETF 独立监控止损：从买入均价（avg_cost）跌了 X% 就卖出该只，
-    其余 ETF 不受影响。下一个再平衡日再重新评估是否买回。
-
-    Parameters
-    ----------
-    rebalance_freq : int | str
-        再平衡频率（默认 "monthly"）。
-    drawdown_stop : float | None
-        单 ETF 止损阈值，None = 不止损。
-    """
+    """风险平价 + 单 ETF 止损 + 止盈。"""
     params = (
         ("rebalance_freq", "monthly"),
         ("drawdown_stop", None),
+        ("take_profit", None),
     )
 
     def __init__(self):
-        self.history = []       # [(date, value, {sym: weight}, stopped_etfs)]
+        self.history = []   # [(date, value, {sym: w}, {"stopped":[], "taken":[]})]
         self._bars_since_rebalance = 0
         self._last_month = None
-        # 单 ETF 止损状态：{symbol: True} 表示该 ETF 已被止损卖出
-        self._stopped_etfs: dict[str, bool] = {}
-        # 记录每只 ETF 的买入均价
+        self._sold_etfs: dict[str, str] = {}   # {sym: "stop"|"take"}
         self._avg_costs: dict[str, float] = {}
 
     def _compute_weights(self) -> dict:
-        """风险平价权重 w_i ∝ 1/σ_i"""
         vols = {}
         for d in self.datas:
             vols[d._name] = d.vol[0]
@@ -130,31 +116,42 @@ class RiskParityWithStopLoss(bt.Strategy):
         current_value = self.broker.getvalue()
         weights = self._compute_weights()
         is_rebalance = self._is_rebalance_day()
-        stopped_now = []
+        events = {"stopped": [], "taken": []}
+        stop_th = self.params.drawdown_stop
+        take_th = self.params.take_profit
 
-        # ── 单 ETF 止损检查（每根 bar） ──
-        if self.params.drawdown_stop is not None:
-            for d in self.datas:
-                pos = self.getposition(d)
-                if pos.size > 0:
-                    current_price = d.close[0]
-                    if d._name not in self._avg_costs:
-                        self._avg_costs[d._name] = pos.price
-                    avg_cost = self._avg_costs[d._name]
-                    if avg_cost > 0:
-                        dd = (avg_cost - current_price) / avg_cost
-                        if dd >= self.params.drawdown_stop:
+        # ── 单 ETF 止损 + 止盈检查（每根 bar） ──
+        for d in self.datas:
+            pos = self.getposition(d)
+            if pos.size > 0:
+                current_price = d.close[0]
+                if d._name not in self._avg_costs:
+                    self._avg_costs[d._name] = pos.price
+                avg_cost = self._avg_costs[d._name]
+                if avg_cost > 0:
+                    # 止损：从 avg_cost 跌了 X%
+                    if stop_th is not None:
+                        drop = (avg_cost - current_price) / avg_cost
+                        if drop >= stop_th:
                             self.order_target_percent(d, 0.0)
-                            self._stopped_etfs[d._name] = True
-                            stopped_now.append(d._name)
+                            self._sold_etfs[d._name] = "stop"
+                            events["stopped"].append(d._name)
+                            continue
+                    # 止盈：从 avg_cost 涨了 X%（仅当同一 ETF 未触发止损时）
+                    if take_th is not None:
+                        rise = (current_price - avg_cost) / avg_cost
+                        if rise >= take_th:
+                            self.order_target_percent(d, 0.0)
+                            self._sold_etfs[d._name] = "take"
+                            events["taken"].append(d._name)
 
-        # ── 再平衡日：重置止损状态，重新分配权重 ──
+        # ── 再平衡日：重置状态，重新分配权重 ──
         if is_rebalance:
-            self._stopped_etfs.clear()
+            self._sold_etfs.clear()
             for d in self.datas:
                 self.order_target_percent(d, weights.get(d._name, 0.0))
 
-        # 仓位存在但 avg_cost=0（止损后首次重建仓位）→ 从 pos.price 获取
+        # 仓位存在但 avg_cost=0 → 从 pos.price 获取
         for d in self.datas:
             pos = self.getposition(d)
             if pos.size > 0 and self._avg_costs.get(d._name, 0.0) == 0.0:
@@ -163,7 +160,7 @@ class RiskParityWithStopLoss(bt.Strategy):
         # ── 记录历史 ──
         self.history.append((
             self.datas[0].datetime.date(0).isoformat(),
-            current_value, dict(weights), stopped_now,
+            current_value, dict(weights), events,
         ))
 
         self._bars_since_rebalance += 1
@@ -176,7 +173,7 @@ class RiskParityWithStopLoss(bt.Strategy):
 # 4. 回测运行器
 # ══════════════════════════════════════════════════════════════════
 
-def run_one(sl_key: str, sl_threshold: float | None,
+def run_one(key: str, sl_threshold: float | None, tp_threshold: float | None,
             data_panel: dict[str, pd.DataFrame]) -> dict:
     cerebro = bt.Cerebro()
     for symbol, df in data_panel.items():
@@ -188,6 +185,7 @@ def run_one(sl_key: str, sl_threshold: float | None,
         RiskParityWithStopLoss,
         rebalance_freq="monthly",
         drawdown_stop=sl_threshold,
+        take_profit=tp_threshold,
     )
     cerebro.broker.setcash(INITIAL_CASH)
 
@@ -209,7 +207,6 @@ def run_one(sl_key: str, sl_threshold: float | None,
     cerebro.run()
     strat = cerebro.runstrats[0][0]
 
-    stop_events = [(h[0], h[1], h[3]) for h in strat.history if h[3]]
     ret = strat.analyzers.returns.get_analysis()
     sharpe = strat.analyzers.sharpe.get_analysis()
     dd = strat.analyzers.drawdown.get_analysis()
@@ -217,13 +214,13 @@ def run_one(sl_key: str, sl_threshold: float | None,
 
     return {
         "history": strat.history,
-        "stop_events": stop_events,
         "final_value": final_value,
         "total_return": (final_value / INITIAL_CASH) - 1,
         "annual_return": ret.get("rnorm100", 0) / 100,
         "sharpe": sharpe.get("sharperatio", 0),
         "max_drawdown": dd.get("max", {}).get("drawdown", 0) / 100,
-        "n_stops": sum(1 for h in strat.history if h[3]),
+        "n_stops": sum(1 for h in strat.history if h[3].get("stopped")),
+        "n_takes": sum(1 for h in strat.history if h[3].get("taken")),
     }
 
 
@@ -247,25 +244,24 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
 
     # ── Chart 1: 净值对比 ──
     fig1, ax1 = plt.subplots(figsize=(16, 7))
-    for sl_key, _, sl_label in STOP_LOSS_CONFIGS:
-        recs = results[sl_key]["history"]
+    for key, _, _, label in CONFIGS:
+        recs = results[key]["history"]
         df = pd.DataFrame([{"date": r[0], "value": r[1]} for r in recs])
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date")
         ax1.plot(
             df.index, df["value"] / INITIAL_CASH * 100,
-            color=SL_COLORS[sl_key], linestyle=SL_LINESTYLES[sl_key],
+            color=CFG_COLORS[key], linestyle=CFG_LINESTYLES[key],
             linewidth=1.4, alpha=0.9,
             label=(
-                f"{sl_label} — "
-                f"¥{results[sl_key]['final_value']:,.0f}  "
-                f"({results[sl_key]['total_return']:+.1%})  "
-                f"止损{results[sl_key]['n_stops']}次"
+                f"{label} — "
+                f"¥{results[key]['final_value']:,.0f}  "
+                f"({results[key]['total_return']:+.1%})"
             ),
         )
     ax1.axhline(100, color="gray", lw=0.5, ls="--", alpha=0.4)
     ax1.set_title(
-        "风险平价（每月再平衡）| 回撤止损对比\n"
+        "风险平价（每月再平衡）| 止损 + 止盈对比\n"
         f"佣金 {COMMISSION_RATE:.1%} 最低 ¥{MIN_COMMISSION:.0f}",
         fontsize=14, fontweight="bold", linespacing=1.4,
     )
@@ -278,74 +274,84 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
     fig1.tight_layout()
-    fig1.savefig(os.path.join(ASSETS_DIR, "rp-stop-loss-nav-compare.png"),
+    fig1.savefig(os.path.join(ASSETS_DIR, "rp-sl-tp-nav-compare.png"),
                  dpi=150, bbox_inches="tight")
     plt.close(fig1)
-    print("  ✓ assets/rp-stop-loss-nav-compare.png")
+    print("  ✓ assets/rp-sl-tp-nav-compare.png")
 
-    # ── Chart 2: 止损事件标注（2×2 子图） ──
-    fig2, axes = plt.subplots(2, 2, figsize=(16, 10))
+    # ── Chart 2: 事件标注（2×3 子图） ──
+    fig2, axes = plt.subplots(2, 3, figsize=(18, 10))
     axes = axes.flatten()
-    for idx, (sl_key, sl_threshold, sl_label) in enumerate(STOP_LOSS_CONFIGS):
+    for idx, (key, _, _, label) in enumerate(CONFIGS):
         ax = axes[idx]
-        recs = results[sl_key]["history"]
+        recs = results[key]["history"]
         df = pd.DataFrame([
-            {"date": r[0], "value": r[1], "stopped": len(r[3]) > 0}
+            {
+                "date": r[0], "value": r[1],
+                "stopped": len(r[3].get("stopped", [])) > 0,
+                "taken": len(r[3].get("taken", [])) > 0,
+            }
             for r in recs
         ])
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date")
         ax.plot(df.index, df["value"] / INITIAL_CASH * 100,
-                color=SL_COLORS[sl_key], linewidth=1.0, alpha=0.8, label="净值")
-        stop_points = df[df["stopped"]]
-        if not stop_points.empty:
-            ax.scatter(stop_points.index,
-                       stop_points["value"] / INITIAL_CASH * 100,
+                color=CFG_COLORS[key], linewidth=1.0, alpha=0.8, label="净值")
+        stop_pts = df[df["stopped"]]
+        if not stop_pts.empty:
+            ax.scatter(stop_pts.index,
+                       stop_pts["value"] / INITIAL_CASH * 100,
                        color="red", s=40, marker="v", zorder=5,
-                       label=f"止损触发 ({len(stop_points)}次)")
+                       label=f"止损({len(stop_pts)}天)")
+        take_pts = df[df["taken"]]
+        if not take_pts.empty:
+            ax.scatter(take_pts.index,
+                       take_pts["value"] / INITIAL_CASH * 100,
+                       color="green", s=40, marker="^", zorder=5,
+                       label=f"止盈({len(take_pts)}天)")
         ax.axhline(100, color="gray", lw=0.5, ls="--", alpha=0.3)
-        ax.set_title(f"{sl_label} | 最终 ¥{results[sl_key]['final_value']:,.0f}  "
-                     f"夏普 {results[sl_key]['sharpe']:.2f}",
+        ax.set_title(f"{label} | 最终 ¥{results[key]['final_value']:,.0f}  "
+                     f"夏普 {results[key]['sharpe']:.2f}",
                      fontsize=11, fontweight="bold")
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=12))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
-    fig2.suptitle("风险平价止损触发点标注（红色▼ = 止损事件）",
+    fig2.suptitle("风险平价止损/止盈触发点标注（▼止损 ▲止盈）",
                   fontsize=14, fontweight="bold")
     fig2.tight_layout()
-    fig2.savefig(os.path.join(ASSETS_DIR, "rp-stop-loss-events.png"),
+    fig2.savefig(os.path.join(ASSETS_DIR, "rp-sl-tp-events.png"),
                  dpi=150, bbox_inches="tight")
     plt.close(fig2)
-    print("  ✓ assets/rp-stop-loss-events.png")
+    print("  ✓ assets/rp-sl-tp-events.png")
 
     # ── Chart 3: 回撤曲线对比 ──
     fig3, ax3 = plt.subplots(figsize=(16, 5))
-    for sl_key, _, sl_label in STOP_LOSS_CONFIGS:
-        values = [h[1] for h in results[sl_key]["history"]]
+    for key, _, _, label in CONFIGS:
+        values = [h[1] for h in results[key]["history"]]
         peak = np.maximum.accumulate(values)
         dd = (peak - np.array(values)) / peak
-        ax3.plot(dd * 100, color=SL_COLORS[sl_key],
-                 linestyle=SL_LINESTYLES[sl_key],
-                 linewidth=0.9, alpha=0.8, label=sl_label)
-    for threshold, label, color in [
-        (0.05, "5% 阈值", "#e67e22"),
-        (0.10, "10% 阈值", "#e74c3c"),
-        (0.15, "15% 阈值", "#9b59b6"),
+        ax3.plot(dd * 100, color=CFG_COLORS[key],
+                 linestyle=CFG_LINESTYLES[key],
+                 linewidth=0.9, alpha=0.8, label=label)
+    for thr, lbl, clr in [
+        (0.05, "5% 止损线", "#e67e22"),
+        (0.10, "10% 止盈线", "#27ae60"),
+        (0.20, "20% 止盈线", "#8e44ad"),
     ]:
-        ax3.axhline(threshold * 100, color=color, lw=0.7, ls=":", alpha=0.5)
-        ax3.text(len(dd) - 10, threshold * 100 + 0.5, label,
-                 fontsize=8, color=color, alpha=0.6)
+        ax3.axhline(thr * 100, color=clr, lw=0.7, ls=":", alpha=0.5)
+        ax3.text(len(dd) - 10, thr * 100 + 0.5, lbl,
+                 fontsize=8, color=clr, alpha=0.6)
     ax3.set_title("风险平价 — 回撤曲线对比", fontsize=13, fontweight="bold")
     ax3.set_ylabel("回撤幅度")
     ax3.legend(fontsize=9)
     ax3.grid(True, alpha=0.3)
     fig3.tight_layout()
-    fig3.savefig(os.path.join(ASSETS_DIR, "rp-stop-loss-drawdown.png"),
+    fig3.savefig(os.path.join(ASSETS_DIR, "rp-sl-tp-drawdown.png"),
                  dpi=150, bbox_inches="tight")
     plt.close(fig3)
-    print("  ✓ assets/rp-stop-loss-drawdown.png")
+    print("  ✓ assets/rp-sl-tp-drawdown.png")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -354,10 +360,10 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
 
 if __name__ == "__main__":
     print("=" * 72)
-    print("  回撤止损保护研究 — 风险平价")
+    print("  止损 + 止盈保护研究 — 风险平价")
     print(f"  策略: 风险平价 + 每月再平衡")
     print(f"  佣金: {COMMISSION_RATE:.1%}  最低 ¥{MIN_COMMISSION:.0f}")
-    print(f"  止损方案: {' | '.join(s[2] for s in STOP_LOSS_CONFIGS)}")
+    print(f"  方案: {' | '.join(c[3] for c in CONFIGS)}")
     print("=" * 72)
 
     print("\n▶ 获取数据 + 计算指标...")
@@ -367,30 +373,36 @@ if __name__ == "__main__":
 
     print("\n▶ 运行回测...")
     results = {}
-    for sl_key, sl_threshold, sl_label in STOP_LOSS_CONFIGS:
-        print(f"  ▶ {sl_label:>10}...", end=" ")
+    for key, sl_th, tp_th, label in CONFIGS:
+        print(f"  ▶ {label:>10}...", end=" ")
         sys.stdout.flush()
-        results[sl_key] = run_one(sl_key, sl_threshold, panel)
-        r = results[sl_key]
-        print(f"¥{r['final_value']:>8,.0f}  ({r['total_return']:+>+7.2%})  "
-              f"夏普 {r['sharpe']:.2f}  回撤 {r['max_drawdown']:.2%}  "
-              f"止损 {r['n_stops']}次")
+        results[key] = run_one(key, sl_th, tp_th, panel)
+        r = results[key]
+        parts = [f"¥{r['final_value']:>8,.0f}  ({r['total_return']:+>+7.2%})",
+                 f"夏普 {r['sharpe']:.2f}",
+                 f"回撤 {r['max_drawdown']:.2%}"]
+        if r['n_stops']:
+            parts.append(f"止损{r['n_stops']}天")
+        if r['n_takes']:
+            parts.append(f"止盈{r['n_takes']}天")
+        print("  ".join(parts))
 
-    print(f"\n{'=' * 95}")
-    print("  止损方案对比汇总 — 风险平价")
-    print(f"{'=' * 95}")
-    print(f"  {'方案':<12} {'最终值':>10} {'累计收益':>10} {'年化收益':>10} "
-          f"{'最大回撤':>10} {'夏普':>8} {'止损次数':>8}")
-    print(f"  {'─' * 70}")
-    for sl_key, _, sl_label in STOP_LOSS_CONFIGS:
-        r = results[sl_key]
-        print(f"  {sl_label:<12}"
+    print(f"\n{'=' * 105}")
+    print("  方案对比汇总 — 风险平价")
+    print(f"{'=' * 105}")
+    header = f"  {'方案':<12} {'最终值':>10} {'累计收益':>10} {'年化收益':>10} {'最大回撤':>10} {'夏普':>8} {'止损天':>6} {'止盈天':>6}"
+    print(header)
+    print(f"  {'─' * 78}")
+    for key, _, _, label in CONFIGS:
+        r = results[key]
+        print(f"  {label:<12}"
               f" ¥{r['final_value']:>8,.0f}"
               f" {r['total_return']:>+9.2%}"
               f" {r['annual_return']:>9.2%}"
               f" {r['max_drawdown']:>9.2%}"
               f" {r['sharpe']:>7.2f}"
-              f" {r['n_stops']:>8d}")
+              f" {r['n_stops']:>6d}"
+              f" {r['n_takes']:>6d}")
     print()
 
     print("▶ 生成图表...")
