@@ -49,13 +49,13 @@ CFG_LINESTYLES = {
 # 1. 数据准备
 # ══════════════════════════════════════════════════════════════════
 
-def build_panel() -> dict[str, pd.DataFrame]:
+def build_panel(start_date="20210101", end_date="20260101", mom_period=20) -> dict[str, pd.DataFrame]:
     data = {}
     for symbol in ("510300", "513100", "518880"):
-        df = fetch_etf_data(symbol=symbol, start_date="20210101", end_date="20260101")
+        df = fetch_etf_data(symbol=symbol, start_date=start_date, end_date=end_date)
         df["log_return"] = np.log(df["Close"] / df["Close"].shift(1))
-        df["mom"] = df["log_return"].rolling(MOM_PERIOD).mean()
-        df["vol"] = df["log_return"].rolling(MOM_PERIOD).std(ddof=1)
+        df["mom"] = df["log_return"].rolling(mom_period).mean()
+        df["vol"] = df["log_return"].rolling(mom_period).std(ddof=1)
         df["ram"] = df["mom"] / df["vol"]
         data[symbol] = df
     return data
@@ -339,7 +339,55 @@ def fmt_ratio(v: float) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# 7. 可视化
+# 7. 按年份拆解 + 动量窗口敏感性测试
+# ══════════════════════════════════════════════════════════════════
+
+def compute_yearly_metrics(history: list) -> dict[str, dict]:
+    """按日历年份计算年收益率、年波动率、年内最大回撤。"""
+    from collections import OrderedDict
+    yearly: dict[str, list] = {}
+    for h in history:
+        yr = h[0][:4]
+        yearly.setdefault(yr, []).append(h)
+
+    result = OrderedDict()
+    for yr in sorted(yearly):
+        vals = np.array([r[1] for r in yearly[yr]])
+        dret = vals[1:] / vals[:-1] - 1
+        n = len(dret)
+        ann_ret = vals[-1] / vals[0] - 1  # 年收益率（非年化，因为就是一年）
+        ann_vol = np.std(dret, ddof=1) * np.sqrt(TRADING_DAYS) if n > 1 else 0.0
+        peak = np.maximum.accumulate(vals)
+        dd = (peak - vals) / peak
+        max_dd = float(np.max(dd)) if len(dd) > 0 else 0.0
+        result[yr] = {"ann_ret": ann_ret, "ann_vol": ann_vol, "max_dd": max_dd}
+    return result
+
+
+def _find_config(key: str):
+    for k, sl, tp, rob, label in CONFIGS:
+        if k == key:
+            return sl, tp, rob, label
+    return None, None, False, ""
+
+
+SENSITIVITY_WINDOWS = [5, 10, 15, 20, 25, 30]
+
+
+def run_sensitivity(key: str, year: str, sl_th, tp_th, rob):
+    """对指定 (策略, 年份) 换 6 种动量窗口重跑，返回 {窗口: 年收益率}。"""
+    start = f"{year}0101"
+    end = f"{int(year) + 1}0101"
+    results = {}
+    for mp in SENSITIVITY_WINDOWS:
+        panel = build_panel(start_date=start, end_date=end, mom_period=mp)
+        res = run_one(key, sl_th, tp_th, rob, panel)
+        results[mp] = res["total_return"]
+    return results
+
+
+# ══════════════════════════════════════════════════════════════════
+# 8. 可视化
 # ══════════════════════════════════════════════════════════════════
 
 def _init_mpl():
@@ -471,7 +519,7 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 8. 主流程
+# 9. 主流程
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
@@ -566,6 +614,79 @@ if __name__ == "__main__":
                 diff = val - bv
             row += f" {fmt_map[met](diff):>8}"
         print(row)
+    print()
+
+    # ── 年份拆解 ──
+    print("▶ 按年份拆解收益率...")
+    yearly_all = {}
+    for key, _, _, _, label in CONFIGS:
+        yearly_all[key] = compute_yearly_metrics(results[key]["history"])
+    years = sorted(yearly_all["buy_hold"].keys())
+
+    # 打印年收益率矩阵
+    print(f"\n{'=' * (12 + 1 + 14 * len(years))}")
+    print(f"  {'方案':<12}", end="")
+    for yr in years:
+        print(f" {yr:>>7}收益{'':>3}波动{'':>3}回撤", end="")
+    print()
+    print(f"  {'─' * (12 + 1 + 14 * len(years))}")
+
+    neg_cases = []  # (key, year, label)
+    for key, _, _, _, label in CONFIGS:
+        row = f"  {label:<12}"
+        for yr in years:
+            m = yearly_all[key].get(yr, {})
+            r = m.get("ann_ret", 0)
+            v = m.get("ann_vol", 0)
+            dd = m.get("max_dd", 0)
+            row += f" {r:+>+7.1%}"
+            row += f" {v:>5.1%}"
+            row += f" {dd:>4.1%}"
+            if r < 0:
+                neg_cases.append((key, yr, label))
+        print(row)
+    print(f"  {'─' * (12 + 1 + 14 * len(years))}")
+    print(f"  {'负收益标记':<12}", end="")
+    for yr in years:
+        neg_in_year = any(k == yr for _, k, _ in neg_cases)
+        print(f" {'⚠️' if neg_in_year else '✅':>14}", end="")
+    print()
+    print()
+
+    # ── 年收益率表（仅收益列，更紧凑） ──
+    print(f"{'方案':<14}", end="")
+    for yr in years:
+        print(f" {yr:>10}", end="")
+    print()
+    print(f"{'─' * (14 + 12 * len(years))}")
+    for key, _, _, _, label in CONFIGS:
+        print(f"{label:<14}", end="")
+        for yr in years:
+            r = yearly_all[key].get(yr, {}).get("ann_ret", 0)
+            print(f" {r:+>+9.1%}", end="")
+        print()
+    print()
+
+    # ── 负收益年份敏感性测试 ──
+    if neg_cases:
+        print("▶ 负收益年份敏感性测试（换 6 种动量窗口 5/10/15/20/25/30 天）...")
+        print(f"  发现 {len(neg_cases)} 个负收益 (策略, 年份) 组合:")
+        for key, yr, label in neg_cases:
+            rr = yearly_all[key][yr]["ann_ret"]
+            print(f"    {label}  {yr}年  {rr:+.1%}")
+
+        print()
+        for key, yr, label in neg_cases:
+            sl, tp, rob, _ = _find_config(key)
+            print(f"  ▶ {label}  {yr}年")
+            sens = run_sensitivity(key, yr, sl, tp, rob)
+            for mp in SENSITIVITY_WINDOWS:
+                r = sens[mp]
+                flag = "✅" if r >= 0 else "❌"
+                print(f"     MOM={mp:>2d}天  {r:+>+8.1%} {flag}")
+            print()
+    else:
+        print("▶ 所有策略在所有年份均为正收益，无需敏感性测试。")
     print()
 
     print("▶ 生成图表...")

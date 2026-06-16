@@ -1,0 +1,45 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link "XQuant" [ref=e6] [cursor=pointer]:
+        - /url: /products
+        - generic [ref=e7]: XQuant
+      - navigation [ref=e8]:
+        - link "组合商店" [ref=e9] [cursor=pointer]:
+          - /url: /products
+        - link "市场洞察" [ref=e10] [cursor=pointer]:
+          - /url: /insights
+        - link "量化课堂" [ref=e11] [cursor=pointer]:
+          - /url: /courses
+      - link "Login" [ref=e13] [cursor=pointer]:
+        - /url: /login
+  - main [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e17]:
+        - generic [ref=e18]:
+          - link "XQuant 量化课堂" [ref=e19] [cursor=pointer]:
+            - /url: /courses
+          - heading "XQuant Beginner" [level=1] [ref=e20]
+          - paragraph [ref=e21]: 《XQuant：人人都是量化交易员》开源书稿，已搬运为站内阅读版本。 书稿正文与图片遵循 CC BY-NC-SA 4.0。
+        - link "返回课程页" [ref=e22] [cursor=pointer]:
+          - /url: /courses
+      - main [ref=e24]:
+        - group [ref=e25]:
+          - generic "打开目录" [ref=e26] [cursor=pointer]
+        - article [ref=e27]:
+          - paragraph [ref=e28]: 交易规则
+          - paragraph [ref=e29]: 章节加载中...
+        - generic [ref=e30]:
+          - link "上一章：第 3 章：给 ETF 分钱" [ref=e31] [cursor=pointer]:
+            - /url: /courses/book/q3-how-much
+            - generic [ref=e32]: 上一章
+            - generic [ref=e33]: 第 3 章：给 ETF 分钱
+          - link "下一章：第 5 章：策略好不好？" [ref=e34] [cursor=pointer]:
+            - /url: /courses/book/q5-how-to-validate
+            - generic [ref=e35]: 下一章
+            - generic [ref=e36]: 下一章：第 5 章：策略好不好？
+  - contentinfo [ref=e37]:
+    - generic [ref=e38]:
+      - paragraph [ref=e39]: 风险提示：本平台仅提供量化研究工具和教育内容，不构成任何投资建议。 历史表现不代表未来收益，投资决策需自行判断。 策略信号为模型计算输出，仅供学习研究参考。
+      - link "京ICP备2025142065号-3" [ref=e41] [cursor=pointer]:
+        - /url: https://beian.miit.gov.cn/
