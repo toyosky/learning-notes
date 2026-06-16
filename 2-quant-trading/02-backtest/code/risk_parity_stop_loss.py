@@ -387,7 +387,165 @@ def run_sensitivity(key: str, year: str, sl_th, tp_th, rob):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 8. 可视化
+# 8. 月度分布分析
+# ══════════════════════════════════════════════════════════════════
+
+MONTHLY_KEYS = ["buy_hold", "none", "sl_5", "sl_5_immediate"]
+MONTHLY_LABELS = ["买入持有", "无止损失", "5% 止损", "5%止+即时重配"]
+
+
+def compute_monthly_returns(history: list) -> dict[str, float]:
+    """按{年-月}分组计算月度收益率。月收益 = (月末净值 / 月初净值) - 1。"""
+    month_vals: dict[str, list] = {}
+    for h in history:
+        ym = h[0][:7]
+        month_vals.setdefault(ym, []).append(h[1])
+    monthly = {}
+    for ym in sorted(month_vals):
+        vals = month_vals[ym]
+        ret = vals[-1] / vals[0] - 1
+        monthly[ym] = ret
+    return monthly
+
+
+def monthly_analysis(monthly: dict[str, float]) -> dict:
+    """月度分布统计。月收益 = 0 视为亏损。"""
+    rets = list(monthly.values())
+    n = len(rets)
+    if n == 0:
+        return {}
+    wins = [r for r in rets if r > 0]
+    losses = [r for r in rets if r <= 0]
+    n_win = len(wins)
+    n_loss = len(losses)
+    win_rate = n_win / n if n > 0 else 0
+    avg_win = float(np.mean(wins)) if wins else 0
+    avg_loss = float(np.mean(losses)) if losses else 0
+    profit_factor = abs(sum(wins) / sum(losses)) if losses and sum(losses) != 0 else float("inf")
+    win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else float("inf")
+
+    streak = 0
+    longest_win = 0
+    longest_loss = 0
+    for r in rets:
+        if r > 0:
+            streak = streak + 1 if streak > 0 else 1
+        else:
+            streak = streak - 1 if streak < 0 else -1
+        longest_win = max(longest_win, streak)
+        longest_loss = min(longest_loss, streak)
+    longest_loss = abs(longest_loss)
+
+    return {
+        "n_months": n,
+        "n_win": n_win, "n_loss": n_loss,
+        "win_rate": win_rate,
+        "avg_win": avg_win, "avg_loss": avg_loss,
+        "win_loss_ratio": win_loss_ratio,
+        "profit_factor": profit_factor,
+        "longest_win": longest_win,
+        "longest_loss": longest_loss,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+# 9. 回撤事件追踪（≥ threshold 才算事件）
+# ══════════════════════════════════════════════════════════════════
+
+DD_THRESHOLD = 0.001
+
+
+def get_drawdown_events(history: list, threshold: float = DD_THRESHOLD) -> dict:
+    """
+    回撤事件追踪。
+
+    规则：
+    - 起点：dd 从 ≤threshold 变为 >threshold 的那天（跌穿阈值）
+    - 恢复：dd 从 >threshold 变为 ≤threshold 的那天（回到阈值之上）
+    - dd 以每日收盘价计算，非 intraday
+    - 未恢复的事件：恢复日标记为 None
+    """
+    values = np.array([h[1] for h in history])
+    dates = [h[0] for h in history]
+    peak = np.maximum.accumulate(values)
+    dd = (peak - values) / peak
+
+    events = []
+    in_event = False
+    event_start = None
+    event_start_val = None
+    event_peak_val = None
+
+    for i in range(len(dd)):
+        if not in_event and dd[i] > threshold:
+            in_event = True
+            event_start = i
+            event_start_val = values[i]
+            event_peak_val = peak[i]
+        elif in_event and dd[i] <= threshold:
+            in_event = False
+            events.append({
+                "start_idx": event_start,
+                "end_idx": i,
+                "start_date": dates[event_start],
+                "end_date": dates[i],
+                "start_value": event_start_val,
+                "end_value": values[i],
+                "peak_value": event_peak_val,
+                "max_dd": float(np.max(dd[event_start:i+1])),
+                "depth": float(np.max(dd[event_start:i+1])),
+                "recovered": True,
+            })
+            event_start = None
+            event_start_val = None
+            event_peak_val = None
+
+    if in_event:
+        events.append({
+            "start_idx": event_start,
+            "end_idx": None,
+            "start_date": dates[event_start],
+            "end_date": None,
+            "start_value": event_start_val,
+            "end_value": values[-1],
+            "peak_value": event_peak_val,
+            "max_dd": float(np.max(dd[event_start:])),
+            "depth": float(np.max(dd[event_start:])),
+            "recovered": False,
+        })
+
+    if not events:
+        return {"events": [], "n_events": 0, "avg_depth": 0, "avg_duration": 0,
+                "max_depth": 0, "longest_duration": 0, "n_unrecovered": 0}
+
+    depths = [e["depth"] for e in events]
+    durations = []
+    for e in events:
+        if e["recovered"]:
+            durations.append(e["end_idx"] - e["start_idx"])
+    n_unrec = sum(1 for e in events if not e["recovered"])
+
+    return {
+        "events": sorted(events, key=lambda x: x["depth"], reverse=True),
+        "n_events": len(events),
+        "avg_depth": float(np.mean(depths)),
+        "avg_duration": int(np.mean(durations)) if durations else 0,
+        "max_depth": float(np.max(depths)),
+        "longest_duration": max(durations) if durations else 0,
+        "n_unrecovered": n_unrec,
+    }
+
+
+def fmt_duration(days: int) -> str:
+    if days < 5:
+        return f"{days}天"
+    m = days // 21
+    d = days % 21
+    return f"{m}月{d}天" if d else f"{m}月"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 10. 可视化（扩展）
 # ══════════════════════════════════════════════════════════════════
 
 def _init_mpl():
@@ -518,8 +676,115 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
     print("  ✓ assets/rp-sl-tp-drawdown.png")
 
 
+# ── Chart 4: 月度收益直方图 ──
+def generate_monthly_histogram(results: dict):
+    plt, _ = _init_mpl()
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+    for idx, (key, label) in enumerate(zip(MONTHLY_KEYS, MONTHLY_LABELS)):
+        ax = axes[idx]
+        monthly = compute_monthly_returns(results[key]["history"])
+        rets = list(monthly.values())
+        colors = ["#e74c3c" if r < 0 else "#2ecc71" for r in rets]
+        ax.bar(range(len(rets)), [r * 100 for r in rets],
+               color=colors, width=0.8, alpha=0.8)
+        ax.axhline(0, color="gray", lw=0.5)
+        stat = monthly_analysis(monthly)
+        ax.set_title(
+            f"{label}\n"
+            f"胜率 {stat['win_rate']:.0%}  |  "
+            f"均值盈 {stat['avg_win']:+.2%} / 亏 {stat['avg_loss']:+.2%}  |  "
+            f"盈亏比 {stat['win_loss_ratio']:.2f}",
+            fontsize=11, fontweight="bold",
+        )
+        ax.set_ylabel("月度收益")
+        ax.set_xlabel(f"共 {stat['n_months']} 个月 | "
+                       f"最长连赢 {stat['longest_win']} / 连亏 {stat['longest_loss']}")
+        if len(rets) <= 60:
+            ax.set_xticks(range(0, len(rets), 6))
+            ax.set_xticklabels(list(monthly.keys())[::6], rotation=45, fontsize=7)
+        ax.grid(True, alpha=0.2)
+    fig.suptitle("月度收益分布", fontsize=14, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(os.path.join(ASSETS_DIR, "rp-monthly-histogram.png"),
+                dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print("  ✓ assets/rp-monthly-histogram.png")
+
+
+# ── Chart 5: 水下曲线（逐策略） ──
+def generate_underwater_curves(results: dict):
+    plt, _ = _init_mpl()
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+    axes = axes.flatten()
+    for idx, (key, label) in enumerate(zip(MONTHLY_KEYS, MONTHLY_LABELS)):
+        ax = axes[idx]
+        values = np.array([h[1] for h in results[key]["history"]])
+        dates = pd.to_datetime([h[0] for h in results[key]["history"]])
+        peak = np.maximum.accumulate(values)
+        dd = (peak - values) / peak
+        ax.fill_between(dates, dd * 100, 0,
+                        color="#e74c3c", alpha=0.5, linewidth=0)
+        ax.plot(dates, dd * 100, color="#c0392b", linewidth=0.5, alpha=0.8)
+        ax.axhline(0, color="gray", lw=0.5)
+        ax.axhline(-5, color="#e67e22", lw=0.7, ls=":", alpha=0.5)
+        ax.set_title(f"{label} — 水下曲线", fontsize=12, fontweight="bold")
+        ax.set_ylabel("回撤幅度")
+        ax.set_xlabel(f"最大回撤 {np.max(dd):.1%}")
+        ax.grid(True, alpha=0.2)
+    fig.suptitle("回撤曲线（水下）", fontsize=14, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(os.path.join(ASSETS_DIR, "rp-underwater.png"),
+                dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print("  ✓ assets/rp-underwater.png")
+
+
+# ── 月度分析打印 ──
+def print_monthly_analysis(results: dict):
+    print("▶ 月度分布分析（四策略）...")
+    header = f"  {'策略':<12} {'月数':>4} {'胜率':>6} {'平均盈月':>9} {'平均亏月':>9} {'盈亏比':>7} {'盈亏因子':>9} {'连赢':>4} {'连亏':>4}"
+    print(header)
+    print(f"  {'─' * 70}")
+    for key, label in zip(MONTHLY_KEYS, MONTHLY_LABELS):
+        monthly = compute_monthly_returns(results[key]["history"])
+        s = monthly_analysis(monthly)
+        print(f"  {label:<12}"
+              f" {s['n_months']:>4d}"
+              f" {s['win_rate']:>5.0%}"
+              f" {s['avg_win']:>+8.2%}"
+              f" {s['avg_loss']:>+8.2%}"
+              f" {s['win_loss_ratio']:>6.2f}"
+              f" {s['profit_factor']:>8.2f}"
+              f" {s['longest_win']:>4d}"
+              f" {s['longest_loss']:>4d}")
+    print()
+
+
+# ── 回撤事件打印 ──
+def print_drawdown_analysis(results: dict):
+    print("▶ 回撤事件分析（阈值 ≥0.1%）...")
+    for key, label in zip(MONTHLY_KEYS, MONTHLY_LABELS):
+        info = get_drawdown_events(results[key]["history"])
+        print(f"\n  {label}:")
+        print(f"    总回撤事件: {info['n_events']} 次"
+              f"  |  未恢复: {info['n_unrecovered']}"
+              f"  |  平均深度: {info['avg_depth']:.2%}"
+              f"  |  最深: {info['max_depth']:.2%}"
+              f"  |  平均持续: {fmt_duration(info['avg_duration'])}")
+        print(f"    {'─' * 70}")
+        if info["events"]:
+            print(f"    {'开始':>12} {'结束':>12} {'深度':>8} {'持续':>10} {'恢复':>6}")
+            for evt in info["events"][:5]:
+                end = evt["end_date"] if evt["recovered"] else "—"
+                dur = fmt_duration(evt["end_idx"] - evt["start_idx"]) if evt["recovered"] else "—"
+                rec = "✅" if evt["recovered"] else "❌"
+                print(f"    {evt['start_date']:>12} {end:>12} {evt['depth']:>7.1%} {dur:>10} {rec:>6}")
+    print()
+
+
 # ══════════════════════════════════════════════════════════════════
-# 9. 主流程
+# 11. 主流程
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
@@ -689,6 +954,14 @@ if __name__ == "__main__":
         print("▶ 所有策略在所有年份均为正收益，无需敏感性测试。")
     print()
 
+    # ── 月度分布分析 ──
+    print_monthly_analysis(results)
+
+    # ── 回撤事件分析 ──
+    print_drawdown_analysis(results)
+
     print("▶ 生成图表...")
     generate_charts(results, panel)
+    generate_monthly_histogram(results)
+    generate_underwater_curves(results)
     print(f"\n  ✅ 完成。")
