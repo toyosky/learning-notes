@@ -11,6 +11,9 @@ import os
 from datetime import datetime
 from typing import Optional
 
+# ── 缓存目录（模块级，首次自动创建） ──
+DATA_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+
 
 def _detect_and_adjust(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -30,6 +33,27 @@ def _detect_and_adjust(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _cache_path(symbol: str) -> str:
+    return os.path.join(DATA_CACHE_DIR, f"{symbol}.parquet")
+
+
+def _read_cache(symbol: str, start_date: str, end_date: str) -> pd.DataFrame | None:
+    path = _cache_path(symbol)
+    if not os.path.exists(path):
+        return None
+    try:
+        df = load_data(path)
+    except Exception:
+        return None
+    s = pd.to_datetime(start_date)
+    e = pd.to_datetime(end_date)
+    clipped = df[(df.index >= s) & (df.index <= e)]
+    if len(clipped) > 0:
+        print(f"  [缓存] 命中 {symbol} ({len(clipped)} 条, {start_date}~{end_date})")
+        return clipped
+    return None
+
+
 def fetch_etf_data(
     symbol: str = "510300",
     start_date: str = "20210101",
@@ -39,8 +63,9 @@ def fetch_etf_data(
 ) -> pd.DataFrame:
     """
     获取 ETF 日线数据。
-    
-    优先使用东方财富接口（支持 adjust 参数），
+
+    优先使用本地缓存（parquet），
+    次优先东方财富接口（支持 adjust 参数），
     不可达时自动回退到新浪接口（手动前复权）。
 
     Args:
@@ -55,6 +80,10 @@ def fetch_etf_data(
     """
     if end_date is None:
         end_date = datetime.now().strftime("%Y%m%d")
+
+    cached = _read_cache(symbol, start_date, end_date)
+    if cached is not None:
+        return cached
 
     print(f"获取 ETF {symbol} 数据: {start_date} ~ {end_date}")
 
@@ -75,6 +104,7 @@ def fetch_etf_data(
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
         print(f"  [东财源] 获取完成，共 {len(df)} 条记录")
         _save(df, symbol, save_path)
+        _save(df, symbol, _cache_path(symbol))
         return df
     except Exception as e:
         print(f"  [东财源] 不可用 ({type(e).__name__})，回退到新浪源")
@@ -86,7 +116,6 @@ def fetch_etf_data(
     df = df.sort_values('date').reset_index(drop=True)
     df = _detect_and_adjust(df)
 
-    # 过滤日期范围
     s = pd.to_datetime(start_date)
     e = pd.to_datetime(end_date)
     df = df[(df['date'] >= s) & (df['date'] <= e)].set_index('date')
@@ -98,6 +127,7 @@ def fetch_etf_data(
     df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
     print(f"  [新浪源] 获取完成，共 {len(df)} 条记录")
     _save(df, symbol, save_path)
+    _save(df, symbol, _cache_path(symbol))
     return df
 
 
