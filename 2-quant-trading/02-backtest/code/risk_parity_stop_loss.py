@@ -22,22 +22,23 @@ COMMISSION_RATE = 0.001
 MIN_COMMISSION = 5.0
 
 CONFIGS = [
-    ("none",          None,  None,  False,  "无止损失"),
-    ("sl_5",          0.05,  None,  False,  "5% 止损"),
-    ("sl_5_immediate", 0.05,  None,  True,  "5%止+即时重配"),
-    ("sl_5_tp_10",    0.05,  0.10,  False,  "止5%+盈10%"),
-    ("sl_5_tp_20",    0.05,  0.20,  False,  "止5%+盈20%"),
-    ("tp_10",         None,  0.10,  False,  "10%止盈"),
-    ("tp_20",         None,  0.20,  False,  "20%止盈"),
+    ("buy_hold",       None,  None,  False,  "买入持有"),
+    ("none",           None,  None,  False,  "无止损失"),
+    ("sl_5",           0.05,  None,  False,  "5% 止损"),
+    ("sl_5_immediate", 0.05,  None,  True,   "5%止+即时重配"),
+    ("sl_5_tp_10",     0.05,  0.10,  False,  "止5%+盈10%"),
+    ("sl_5_tp_20",     0.05,  0.20,  False,  "止5%+盈20%"),
+    ("tp_10",          None,  0.10,  False,  "10%止盈"),
+    ("tp_20",          None,  0.20,  False,  "20%止盈"),
 ]
 CFG_COLORS = {
-    "none": "#2196F3", "sl_5": "#e67e22",
+    "buy_hold": "#333333", "none": "#2196F3", "sl_5": "#e67e22",
     "sl_5_immediate": "#f39c12",
     "sl_5_tp_10": "#2ecc71", "sl_5_tp_20": "#27ae60",
     "tp_10": "#9b59b6", "tp_20": "#8e44ad",
 }
 CFG_LINESTYLES = {
-    "none": "-", "sl_5": "--",
+    "buy_hold": "-", "none": "-", "sl_5": "--",
     "sl_5_immediate": ":",
     "sl_5_tp_10": "-.", "sl_5_tp_20": ":",
     "tp_10": "--", "tp_20": "-.",
@@ -189,7 +190,42 @@ class RiskParityWithStopLoss(bt.Strategy):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 4. 回测运行器
+# 4. 买入持有策略（基准）
+# ══════════════════════════════════════════════════════════════════
+
+class BuyAndHold(bt.Strategy):
+    """首日按风险平价权重买入，永不调仓。"""
+    def __init__(self):
+        self.history = []
+        self._bought = False
+
+    def _compute_weights(self) -> dict:
+        vols = {}
+        for d in self.datas:
+            vols[d._name] = d.vol[0]
+        clean = {k: v for k, v in vols.items()
+                 if v is not None and v > 0 and not np.isnan(v)}
+        if not clean:
+            n = len(SYMBOLS)
+            return {name: 1.0 / n for name in SYMBOLS}
+        inv = {k: 1.0 / v for k, v in clean.items()}
+        total = sum(inv.values())
+        return {k: inv[k] / total for k in inv}
+
+    def next(self):
+        if not self._bought:
+            weights = self._compute_weights()
+            for d in self.datas:
+                self.order_target_percent(d, weights.get(d._name, 0.0))
+            self._bought = True
+        self.history.append((
+            self.datas[0].datetime.date(0).isoformat(),
+            self.broker.getvalue(), {}, {"stopped": [], "taken": []},
+        ))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 5. 回测运行器
 # ══════════════════════════════════════════════════════════════════
 
 def run_one(key: str, sl_threshold: float | None, tp_threshold: float | None,
@@ -201,13 +237,16 @@ def run_one(key: str, sl_threshold: float | None, tp_threshold: float | None,
         feed._name = symbol
         cerebro.adddata(feed)
 
-    cerebro.addstrategy(
-        RiskParityWithStopLoss,
-        rebalance_freq="monthly",
-        drawdown_stop=sl_threshold,
-        take_profit=tp_threshold,
-        rebalance_on_stop=rebalance_on_stop,
-    )
+    if key == "buy_hold":
+        cerebro.addstrategy(BuyAndHold)
+    else:
+        cerebro.addstrategy(
+            RiskParityWithStopLoss,
+            rebalance_freq="monthly",
+            drawdown_stop=sl_threshold,
+            take_profit=tp_threshold,
+            rebalance_on_stop=rebalance_on_stop,
+        )
     cerebro.broker.setcash(INITIAL_CASH)
 
     class MinCommCommission(bt.CommInfoBase):
@@ -246,7 +285,61 @@ def run_one(key: str, sl_threshold: float | None, tp_threshold: float | None,
 
 
 # ══════════════════════════════════════════════════════════════════
-# 5. 可视化
+# 6. 计量函数（252 交易日口径）
+# ══════════════════════════════════════════════════════════════════
+
+TRADING_DAYS = 252
+RISK_FREE = 0.03
+
+
+def compute_metrics(history: list) -> dict:
+    """计算 7 个评价指标，全部基于日收益率、252 交易日年化。"""
+    values = np.array([h[1] for h in history])
+    dret = values[1:] / values[:-1] - 1
+    n = len(dret)
+
+    cum_ret = values[-1] / values[0] - 1
+    ann_ret = (values[-1] / values[0]) ** (TRADING_DAYS / n) - 1
+    ann_vol = np.std(dret, ddof=1) * np.sqrt(TRADING_DAYS)
+
+    peak = np.maximum.accumulate(values)
+    dd = (peak - values) / peak
+    max_dd = np.max(dd)
+
+    sharpe = (ann_ret - RISK_FREE) / ann_vol if ann_vol > 0 else 0
+    calmar = ann_ret / max_dd if max_dd > 0 else 0
+
+    downside = dret[dret < 0]
+    dv = np.std(downside, ddof=1) * np.sqrt(TRADING_DAYS) if len(downside) > 0 else 0
+    sortino = (ann_ret - RISK_FREE) / dv if dv > 0 else 0
+
+    return {
+        "cum_ret": cum_ret,
+        "ann_ret": ann_ret,
+        "ann_vol": ann_vol,
+        "max_dd": max_dd,
+        "sharpe": sharpe,
+        "calmar": calmar,
+        "sortino": sortino,
+    }
+
+
+METRIC_LABELS = {
+    "cum_ret": "累计收益", "ann_ret": "年化收益", "ann_vol": "波动率",
+    "max_dd": "最大回撤", "sharpe": "夏普比", "calmar": "卡玛比", "sortino": "索提诺比",
+}
+
+
+def fmt_pct(v: float) -> str:
+    return f"{v:+.2%}" if abs(v) < 10 else f"{v:+.1%}"
+
+
+def fmt_ratio(v: float) -> str:
+    return f"{v:+.2f}"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 7. 可视化
 # ══════════════════════════════════════════════════════════════════
 
 def _init_mpl():
@@ -378,7 +471,7 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
 
 
 # ══════════════════════════════════════════════════════════════════
-# 6. 主流程
+# 8. 主流程
 # ══════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
@@ -426,6 +519,53 @@ if __name__ == "__main__":
               f" {r['sharpe']:>7.2f}"
               f" {r['n_stops']:>6d}"
               f" {r['n_takes']:>6d}")
+    print()
+
+    # ── 7 指标对比表（以买入持有为基准） ──
+    print("▶ 计算 7 指标对比（年化口径 252 交易日）...")
+    bmk_key = "buy_hold"
+    bmk_m = compute_metrics(results[bmk_key]["history"])
+    strat_keys = [k for k, _, _, _, _ in CONFIGS if k != bmk_key]
+
+    metrics_order = ["cum_ret", "ann_ret", "ann_vol", "max_dd", "sharpe", "calmar", "sortino"]
+    fmt_map = {"cum_ret": fmt_pct, "ann_ret": fmt_pct, "ann_vol": fmt_pct,
+               "max_dd": fmt_pct, "sharpe": fmt_ratio, "calmar": fmt_ratio, "sortino": fmt_ratio}
+
+    # 表头
+    print(f"\n{'=' * 130}")
+    print(f"  7 指标对比  |  基准: 买入持有")
+    print(f"{'=' * 130}")
+    header = f"  {'方案':<12}"
+    for m in metrics_order:
+        header += f" {METRIC_LABELS[m]:>10}"
+        header += f" {'超额':>8}"
+    print(header)
+    print(f"  {'─' * (12 + 1 + 18 * len(metrics_order))}")
+
+    # 基准行
+    row = f"  {'买入持有':<12}"
+    for m in metrics_order:
+        row += f" {fmt_map[m](bmk_m[m]):>10}"
+        row += f" {'—':>8}"
+    print(row)
+
+    # 策略行
+    for key, _, _, _, label in CONFIGS:
+        if key == bmk_key:
+            continue
+        m = compute_metrics(results[key]["history"])
+        row = f"  {label:<12}"
+        for met in metrics_order:
+            val = m[met]
+            bv = bmk_m[met]
+            row += f" {fmt_map[met](val):>10}"
+            if met in ("ann_vol", "max_dd"):
+                # 越小越好的指标：超额 = 基准 - 策略
+                diff = bv - val
+            else:
+                diff = val - bv
+            row += f" {fmt_map[met](diff):>8}"
+        print(row)
     print()
 
     print("▶ 生成图表...")
