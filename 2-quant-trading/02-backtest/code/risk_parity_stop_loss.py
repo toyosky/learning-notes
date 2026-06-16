@@ -679,8 +679,16 @@ def generate_charts(results: dict, panel: dict[str, pd.DataFrame]):
 # ── Chart 4: 月度收益直方图 ──
 def generate_monthly_histogram(results: dict):
     plt, _ = _init_mpl()
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharey=True)
     axes = axes.flatten()
+    # 计算全局 Y 范围（统一所有子图）
+    all_rets = []
+    for key in MONTHLY_KEYS:
+        monthly = compute_monthly_returns(results[key]["history"])
+        all_rets.extend(monthly.values())
+    global_max = max(abs(r) for r in all_rets) * 1.15
+    global_ylim = (-global_max * 100, global_max * 100)
+
     for idx, (key, label) in enumerate(zip(MONTHLY_KEYS, MONTHLY_LABELS)):
         ax = axes[idx]
         monthly = compute_monthly_returns(results[key]["history"])
@@ -689,22 +697,25 @@ def generate_monthly_histogram(results: dict):
         ax.bar(range(len(rets)), [r * 100 for r in rets],
                color=colors, width=0.8, alpha=0.8)
         ax.axhline(0, color="gray", lw=0.5)
+        ax.set_ylim(global_ylim)
         stat = monthly_analysis(monthly)
         ax.set_title(
             f"{label}\n"
             f"胜率 {stat['win_rate']:.0%}  |  "
             f"均值盈 {stat['avg_win']:+.2%} / 亏 {stat['avg_loss']:+.2%}  |  "
             f"盈亏比 {stat['win_loss_ratio']:.2f}",
-            fontsize=11, fontweight="bold",
+            fontsize=11, fontweight="bold", linespacing=1.2,
         )
-        ax.set_ylabel("月度收益")
         ax.set_xlabel(f"共 {stat['n_months']} 个月 | "
                        f"最长连赢 {stat['longest_win']} / 连亏 {stat['longest_loss']}")
-        if len(rets) <= 60:
-            ax.set_xticks(range(0, len(rets), 6))
-            ax.set_xticklabels(list(monthly.keys())[::6], rotation=45, fontsize=7)
-        ax.grid(True, alpha=0.2)
-    fig.suptitle("月度收益分布", fontsize=14, fontweight="bold")
+        xtick_step = 12
+        ax.set_xticks(range(0, len(rets), xtick_step))
+        ax.set_xticklabels(list(monthly.keys())[::xtick_step], fontsize=8)
+        ax.grid(True, alpha=0.2, axis="y")
+    # 左边子图加 Y 轴标签
+    axes[0].set_ylabel("月度收益率", fontsize=10)
+    axes[2].set_ylabel("月度收益率", fontsize=10)
+    fig.suptitle("月度收益分布（统一 Y 轴）", fontsize=14, fontweight="bold")
     fig.tight_layout()
     fig.savefig(os.path.join(ASSETS_DIR, "rp-monthly-histogram.png"),
                 dpi=150, bbox_inches="tight")
