@@ -732,7 +732,7 @@ for method in ["equal-weight", "risk-parity", "momentum-rank"]:
 
 #### 月度收益直方图
 
-![月度收益直方图](../assets/rp-monthly-histogram.png)
+![月度收益直方图](../../assets/rp-monthly-histogram.png)
 
 直方图可直观看到：5% 止损的红色柱子（亏损月）又少又矮，绿色柱子（盈利月）多而均匀。买入持有的红绿柱子交替密集，亏损月深度显著。
 
@@ -801,7 +801,7 @@ for method in ["equal-weight", "risk-parity", "momentum-rank"]:
 
 #### 水下曲线
 
-![水下曲线](../assets/rp-underwater.png)
+![水下曲线](../../assets/rp-underwater.png)
 
 水下曲线可直观看到：5% 止损的"水下时间"和"水下深度"都明显好于其他策略。买入持有的曲线在 2022 年深潜入水，直到 2024 年才浮出水面（长达 2 年多不见天日）。
 
