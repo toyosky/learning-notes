@@ -6,7 +6,7 @@ date: 2026-06-15
 # `risk_parity.py` 代码讲解
 
 > 把 `risk_parity.py` 从头到尾拆开讲，每段代码对应哪个数学概念。
-> 配合 [[risk-parity-derivation]] 和 [[momentum-ranking-derivation]] 阅读。
+> 配合 [[risk-parity-derivation|风险平价系列（入口）]] 和 [[momentum-ranking-derivation|动量排名推导]] 阅读。
 
 ---
 
@@ -220,7 +220,7 @@ def _risk_parity(vols):
     return {k: inv[k] / total for k in inv}
 ```
 
-**数学对应**：`risk-parity-derivation.md` §5.2
+**数学对应**：[[risk-parity-solution|风险平价条件与求解]] §2.2
 
 推导结论：当 $\rho = 0$ 时，风险平价条件 $w_1\sigma_1 = w_2\sigma_2$ 的解是 $w_i \propto 1/\sigma_i$。
 
@@ -252,7 +252,7 @@ def _momentum_rank(rams):
     return {k: pos[k] / total for k in pos}
 ```
 
-**数学对应**：`momentum-ranking-derivation.md` §7
+**数学对应**：[[../deep/momentum-ranking-derivation|动量排名数学推导]] §7
 
 ```python
 pos = {k: v for k, v in rams.items() if v > 0}  # filter_negative = True
@@ -330,6 +330,6 @@ for method in methods:
 | 你想理解什么 | 读哪篇 |
 |-------------|--------|
 | backtrader 的最小概念 | [[backtrader-intro]] |
-| 风险平价的数学推导 | [[risk-parity-derivation]] |
+| 风险平价系列（入口） | [[risk-parity-derivation]] |
 | 动量排名的数学推导 | [[momentum-ranking-derivation]] |
-| 回测结果和对比 | [[../notes/portfolio-allocation]] |
+| 回测结果和对比 | [[../notes/portfolio-results]] |

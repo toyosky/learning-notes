@@ -659,5 +659,5 @@ $$
 
 ## 相关笔记
 
-- [[../notes/portfolio-allocation|组合分配：等权 vs 风险平价 vs 动量排名]] — 代码实现 + 回测结果
-- [[risk-parity-derivation|风险平价数学推导]] — 对照阅读，理解两种方法的数学根源
+- [[../notes/portfolio-allocation|组合分配系列笔记（入口）]] — 回测结果、对比分析、风险管理
+- [[risk-parity-derivation|风险平价系列（入口）]] — 对照阅读，理解两种方法的数学根源
