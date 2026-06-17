@@ -95,4 +95,4 @@ SMA(1) 等价于当日收盘价，Crossover(1, 20) 实际上是**价格突破均
 
 - [[../../01-data/notes/akshare-basics|akshare 数据获取]] — akshare 数据获取
 - [[dca-backtest]] — 传统 DCA 定投策略
-- [[portfolio-allocation|组合分配：等权 vs 风险平价 vs 动量排名]] — 进阶组合策略（backtrader）
+- [[portfolio-allocation|组合分配系列笔记（入口）]] — 等权 vs 风险平价 vs 动量排名 系统对比

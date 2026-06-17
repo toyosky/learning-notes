@@ -162,4 +162,4 @@ DataFeed ──→ Cerebro ──→ Strategy.next()
 ## 相关笔记
 
 - [[bt-portfolio-allocation|bt 策略实现讲解]] — `risk_parity.py` 逐段解读
-- [[../notes/portfolio-allocation|组合分配笔记]] — 回测结果
+- [[../notes/portfolio-allocation|组合分配系列笔记（入口）]] — 方法 → 回测 → 风险管理

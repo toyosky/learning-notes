@@ -516,4 +516,4 @@ df.loc[df.index < '2022-01-14', ['open', 'high', 'low']] /= 5
 - [[../../02-backtest/notes/dca-backtest|DCA 定投回测]]
 - [[../../02-backtest/notes/ma-crossover-backtest|均线交叉策略回测]]
 - [[../../02-backtest/notes/macro-analysis|三资产宏观分析]]
-- [[../../02-backtest/notes/portfolio-allocation|组合分配方法对比]]
+- [[../../02-backtest/notes/portfolio-allocation|组合分配系列笔记（入口）]]
