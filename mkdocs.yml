@@ -109,3 +109,4 @@ nav:
       - 风险平价 vs 动量排名: 2-quant-trading/02-backtest/notes/portfolio-allocation.md
       - 再平衡频率研究: 2-quant-trading/02-backtest/notes/portfolio-rebalance.md
       - 止损保护与风险管理: 2-quant-trading/02-backtest/notes/portfolio-risk.md
+      - 参数敏感性分析: 2-quant-trading/02-backtest/notes/param-sensitivity.md

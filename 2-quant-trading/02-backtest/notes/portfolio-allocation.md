@@ -857,6 +857,7 @@ for method in ["equal-weight", "risk-parity", "momentum-rank"]:
 
 - [[portfolio-rebalance|再平衡频率专题研究]] — 再平衡频率 + 交易成本完整分析
 - [[portfolio-risk|止损保护与风险管理专题]] — 止损/止盈/买入持有/回撤事件全分析
+- [[param-sensitivity|参数敏感性分析]] — 三参数（频率/止损/动量窗口）夏普比极差对比
 
 ### 基础推导
 
