@@ -43,7 +43,7 @@ date: 2026-06-14
 | [[02-backtest/notes/dca-backtest\|DCA 定投回测]] | 定投 + 均线择时策略回测 |
 | [[02-backtest/notes/ma-crossover-backtest\|均线交叉策略回测]] | pandas 独立实现 + backtrader 框架对比 |
 | [[02-backtest/notes/macro-analysis\|三资产宏观分析]] | 沪深300/纳指100/黄金 相关性 + 组合回测 |
-| [[02-backtest/notes/portfolio-allocation\|组合分配：等权 vs 风险平价 vs 动量排名]] | 三种分配方法系统性对比 |
+| [[02-backtest/notes/portfolio-allocation\|组合分配系列笔记（入口）]] | 等权 vs 风险平价 vs 动量排名：数学推导→回测→风险管理 系统对比 |
 
 ---
 
