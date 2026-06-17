@@ -332,4 +332,4 @@ for method in methods:
 | backtrader 的最小概念 | [[backtrader-intro]] |
 | 风险平价系列（入口） | [[risk-parity-derivation]] |
 | 动量排名的数学推导 | [[momentum-ranking-derivation]] |
-| 回测结果和对比 | [[../notes/portfolio-results]] |
+| 回测结果和对比 | [[../notes/portfolio-allocation]] |

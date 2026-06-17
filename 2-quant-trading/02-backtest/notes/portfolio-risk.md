@@ -245,7 +245,6 @@ date: 2026-06-15
 
 ## 相关笔记
 
-- [[portfolio-overview|组合分配方法总览]] — 方法选型指南
-- [[portfolio-results|回测结果与对比分析]] — 基础回测结果
-- [[portfolio-rebalance|再平衡频率研究]] — 频率优化
+- [[portfolio-allocation|组合分配：等权 vs 风险平价 vs 动量排名]] — 主笔记：方法对比 + 回测结果
+- [[portfolio-rebalance|再平衡频率研究]] — 频率优化（前置阅读）
 - [[../../01-data/deep/forward-vs-backward-adjustment|前复权 vs 后复权]] — 数据清洗基础
