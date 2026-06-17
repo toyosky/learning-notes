@@ -49,7 +49,7 @@ date: 2026-06-13
  2.1-数据   2.2-DCA    2.2-均线   2.3-组合分配
 ```
 
-> 组合分配系列包含：方法总览、回测结果、再平衡频率、止损保护等专题，从 [[../../2-quant-trading/02-backtest/notes/portfolio-overview\|方法总览]] 开始阅读。
+> 组合分配系列包含：方法总览、回测结果、再平衡频率、止损保护等专题，详见 [[../../2-quant-trading/02-backtest/notes/portfolio-allocation\|组合分配主笔记]]。
 
 ## 关于本库
 
