@@ -260,21 +260,19 @@ def plot_enhanced_comparison(data):
     ax1.axhline(y=0, color='black', linewidth=0.5)
     ax1.set_xlim(data.index[0], data.index[-1])
 
-    # ── 下图: 各策略每月买入金额对比（堆叠条形）──
+    # 与 dca_ma_strategy 逻辑一致：先算日线MA → 再取每月第一个交易日
     monthly_first = data.resample('ME').first()
     monthly_dates = monthly_first.index
 
-    # 收集各策略的每月买入信号
     buy_signals = {}
     for ma_period, _ in styles:
-        ma_vals = data['Close'].rolling(ma_period).mean()
-        ma_monthly = ma_vals.reindex(monthly_dates)
+        data_ma = data.copy()
+        data_ma[f'MA{ma_period}'] = data['Close'].rolling(ma_period).mean()
+        mf = data_ma.resample('ME').first()
         signals = []
         for dt in monthly_dates:
-            if dt in ma_monthly.index and pd.notna(ma_monthly.loc[dt]):
-                signals.append(1 if monthly_first.loc[dt, 'Close'] > ma_monthly.loc[dt] else 0)
-            else:
-                signals.append(0)
+            ma_val = mf.loc[dt, f'MA{ma_period}']
+            signals.append(1 if (pd.notna(ma_val) and mf.loc[dt, 'Close'] > ma_val) else 0)
         buy_signals[f'MA{ma_period}'] = signals
 
     x = range(len(monthly_dates))
