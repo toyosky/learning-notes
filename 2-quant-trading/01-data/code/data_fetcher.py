@@ -2,7 +2,17 @@
 """
 数据获取模块 - 使用 akshare 获取 A 股和 ETF 数据
 
-数据源策略：优先东方财富（支持原生复权），不可达时自动回退到新浪。
+数据源策略（简单优先）：
+  1. 本地 parquet 缓存（最快）
+  2. 新浪源（主力线上源，支持 qfq / 手动拆股检测）
+  3. 腾讯源（容灾回退，不支持复权）
+  
+  ❌ 不再使用东方财富（fund_etf_hist_em / stock_zh_a_hist）
+  
+各标的类型对应：
+  ETF → fund_etf_hist_sina（新浪，手动拆股）
+  A 股 → stock_zh_a_daily（新浪，原生 qfq）
+  回退 → stock_zh_index_daily_tx（腾讯，无复权）
 """
 
 import akshare as ak
@@ -58,21 +68,20 @@ def fetch_etf_data(
     symbol: str = "510300",
     start_date: str = "20210101",
     end_date: Optional[str] = None,
-    adjust: str = "qfq",
     save_path: Optional[str] = None
 ) -> pd.DataFrame:
     """
     获取 ETF 日线数据。
 
-    优先使用本地缓存（parquet），
-    次优先东方财富接口（支持 adjust 参数），
-    不可达时自动回退到新浪接口（手动前复权）。
+    数据源优先级：
+      1. 本地 parquet 缓存
+      2. 新浪 fund_etf_hist_sina（主力，手动拆股检测）
+      3. 腾讯 stock_zh_index_daily_tx（容灾回退，无复权）
 
     Args:
         symbol: ETF 代码，如 "510300" (沪深300ETF)
         start_date: 开始日期，格式 YYYYMMDD
         end_date: 结束日期，格式 YYYYMMDD，默认为今天
-        adjust: 复权方式，"qfq" 前复权，"" 不复权（仅 EM 源生效）
         save_path: 保存路径，None 则不保存
 
     Returns:
@@ -87,48 +96,53 @@ def fetch_etf_data(
 
     print(f"获取 ETF {symbol} 数据: {start_date} ~ {end_date}")
 
-    # --- 尝试东方财富 ---
+    # --- ① 新浪源（主力，需手动拆股检测） ---
     try:
-        df = ak.fund_etf_hist_em(
-            symbol=symbol, period="daily",
-            start_date=start_date, end_date=end_date,
-            adjust=adjust,
-        )
-        df['日期'] = pd.to_datetime(df['日期'])
-        df = df.set_index('日期')
+        prefix = "sh" if symbol.startswith(("5", "6")) else "sz"
+        df = ak.fund_etf_hist_sina(symbol=f"{prefix}{symbol}")
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date').reset_index(drop=True)
+        df = _detect_and_adjust(df)
+
+        s = pd.to_datetime(start_date)
+        e = pd.to_datetime(end_date)
+        df = df[(df['date'] >= s) & (df['date'] <= e)].set_index('date')
         df.index.name = 'Date'
         df = df.rename(columns={
-            '开盘': 'Open', '收盘': 'Close', '最高': 'High',
-            '最低': 'Low', '成交量': 'Volume',
+            'open': 'Open', 'high': 'High', 'low': 'Low',
+            'close': 'Close', 'volume': 'Volume',
         })
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
-        print(f"  [东财源] 获取完成，共 {len(df)} 条记录")
+        print(f"  [新浪源] 获取完成，共 {len(df)} 条记录")
         _save(df, symbol, save_path)
         _save(df, symbol, _cache_path(symbol))
         return df
     except Exception as e:
-        print(f"  [东财源] 不可用 ({type(e).__name__})，回退到新浪源")
+        print(f"  [新浪源] 不可用 ({type(e).__name__})，回退到腾讯源")
 
-    # --- 回退：新浪 ---
-    prefix = "sh" if symbol.startswith(("5", "6")) else "sz"
-    df = ak.fund_etf_hist_sina(symbol=f"{prefix}{symbol}")
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values('date').reset_index(drop=True)
-    df = _detect_and_adjust(df)
-
-    s = pd.to_datetime(start_date)
-    e = pd.to_datetime(end_date)
-    df = df[(df['date'] >= s) & (df['date'] <= e)].set_index('date')
-    df.index.name = 'Date'
-    df = df.rename(columns={
-        'open': 'Open', 'high': 'High', 'low': 'Low',
-        'close': 'Close', 'volume': 'Volume',
-    })
-    df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
-    print(f"  [新浪源] 获取完成，共 {len(df)} 条记录")
-    _save(df, symbol, save_path)
-    _save(df, symbol, _cache_path(symbol))
-    return df
+    # --- ② 腾讯源（容灾回退，无复权） ---
+    try:
+        prefix = "sh" if symbol.startswith(("5", "6")) else "sz"
+        df = ak.stock_zh_index_daily_tx(
+            symbol=f"{prefix}{symbol}",
+            start_date=start_date,
+            end_date=end_date,
+        )
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.set_index('date')
+        df.index.name = 'Date'
+        df = df.rename(columns={
+            'open': 'Open', 'close': 'Close',
+            'high': 'High', 'low': 'Low', 'amount': 'Volume',
+        })
+        df['Volume'] = df['Volume'] * 100  # 手 → 股
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        print(f"  [腾讯源] 获取完成，共 {len(df)} 条记录")
+        _save(df, symbol, save_path)
+        _save(df, symbol, _cache_path(symbol))
+        return df
+    except Exception as e:
+        raise RuntimeError(f"所有数据源不可用: {type(e).__name__}") from e
 
 
 def fetch_stock_data(
@@ -140,15 +154,17 @@ def fetch_stock_data(
 ) -> pd.DataFrame:
     """
     获取 A 股日线数据。
-    
-    优先使用东方财富接口（支持 adjust 参数），
-    不可达时自动回退到腾讯接口。
+
+    数据源优先级：
+      1. 本地 parquet 缓存
+      2. 新浪 stock_zh_a_daily（主力，原生 qfq 复权）
+      3. 腾讯 stock_zh_index_daily_tx（容灾回退，无复权）
 
     Args:
         symbol: 股票代码，如 "600519" (贵州茅台)
         start_date: 开始日期，格式 YYYYMMDD
         end_date: 结束日期，格式 YYYYMMDD，默认为今天
-        adjust: 复权方式，"qfq" 前复权，"" 不复权（仅 EM 源生效）
+        adjust: 复权方式，"qfq" 前复权，"" 不复权（仅新浪源生效）
         save_path: 保存路径，None 则不保存
 
     Returns:
@@ -157,49 +173,59 @@ def fetch_stock_data(
     if end_date is None:
         end_date = datetime.now().strftime("%Y%m%d")
 
+    cached = _read_cache(symbol, start_date, end_date)
+    if cached is not None:
+        return cached
+
     print(f"获取股票 {symbol} 数据: {start_date} ~ {end_date}")
 
-    # --- 尝试东方财富 ---
+    # --- ① 新浪源（主力，支持原生 qfq 复权） ---
     try:
-        df = ak.stock_zh_a_hist(
-            symbol=symbol, period="daily",
-            start_date=start_date, end_date=end_date,
+        prefix = "sh" if symbol.startswith(("6", "9")) else "sz"
+        df = ak.stock_zh_a_daily(
+            symbol=f"{prefix}{symbol}",
+            start_date=start_date,
+            end_date=end_date,
             adjust=adjust,
         )
-        df['日期'] = pd.to_datetime(df['日期'])
-        df = df.set_index('日期')
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.set_index('date')
         df.index.name = 'Date'
         df = df.rename(columns={
-            '开盘': 'Open', '收盘': 'Close', '最高': 'High',
-            '最低': 'Low', '成交量': 'Volume',
+            'open': 'Open', 'high': 'High', 'low': 'Low',
+            'close': 'Close', 'volume': 'Volume',
         })
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
-        print(f"  [东财源] 获取完成，共 {len(df)} 条记录")
+        print(f"  [新浪源] 获取完成，共 {len(df)} 条记录")
         _save(df, symbol, save_path)
+        _save(df, symbol, _cache_path(symbol))
         return df
     except Exception as e:
-        print(f"  [东财源] 不可用 ({type(e).__name__})，回退到腾讯源")
+        print(f"  [新浪源] 不可用 ({type(e).__name__})，回退到腾讯源")
 
-    # --- 回退：腾讯（stock_zh_index_daily_tx 也支持股票） ---
-    prefix = "sh" if symbol.startswith(("6", "9")) else "sz"
-    df = ak.stock_zh_index_daily_tx(
-        symbol=f"{prefix}{symbol}",
-        start_date=start_date,
-        end_date=end_date,
-    )
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.set_index('date')
-    df.index.name = 'Date'
-    # amount 单位为手，转为股
-    df = df.rename(columns={
-        'open': 'Open', 'close': 'Close',
-        'high': 'High', 'low': 'Low', 'amount': 'Volume',
-    })
-    df['Volume'] = df['Volume'] * 100  # 手 → 股
-    df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
-    print(f"  [腾讯源] 获取完成，共 {len(df)} 条记录")
-    _save(df, symbol, save_path)
-    return df
+    # --- ② 腾讯源（容灾回退，无复权） ---
+    try:
+        prefix = "sh" if symbol.startswith(("6", "9")) else "sz"
+        df = ak.stock_zh_index_daily_tx(
+            symbol=f"{prefix}{symbol}",
+            start_date=start_date,
+            end_date=end_date,
+        )
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.set_index('date')
+        df.index.name = 'Date'
+        df = df.rename(columns={
+            'open': 'Open', 'close': 'Close',
+            'high': 'High', 'low': 'Low', 'amount': 'Volume',
+        })
+        df['Volume'] = df['Volume'] * 100  # 手 → 股
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        print(f"  [腾讯源] 获取完成，共 {len(df)} 条记录")
+        _save(df, symbol, save_path)
+        _save(df, symbol, _cache_path(symbol))
+        return df
+    except Exception as e:
+        raise RuntimeError(f"所有数据源不可用: {type(e).__name__}") from e
 
 
 def _save(df: pd.DataFrame, symbol: str, save_path: Optional[str]) -> None:
@@ -227,7 +253,7 @@ def fetch_multiple_symbols(
         try:
             save_path = os.path.join(output_dir, f"{symbol}.parquet")
             if symbol.startswith(("5", "1")):
-                df = fetch_etf_data(symbol, start_date, end_date, adjust, save_path)
+                df = fetch_etf_data(symbol, start_date, end_date, save_path)
             else:
                 df = fetch_stock_data(symbol, start_date, end_date, adjust, save_path)
             data_dict[symbol] = df

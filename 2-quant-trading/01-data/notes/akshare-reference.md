@@ -31,7 +31,7 @@ date: 2026-06-15
 
 ### 日线历史
 
-推荐通过 `data_fetcher.fetch_stock_data()` 统一获取（自动尝试东财 → 回退腾讯）：
+推荐通过 `data_fetcher.fetch_stock_data()` 统一获取（自动尝试东财 → 回退新浪）：
 
 ```python
 from data_fetcher import fetch_stock_data
@@ -122,16 +122,11 @@ df = fetch_stock_data(symbol="600519", start_date="20210101")
 ```
 
 **数据源策略：**
-1. 优先尝试东方财富（支持 `adjust` 原生复权）
-2. 不可达时自动回退到新浪（ETF）或腾讯（A 股），并自动处理拆股修正
+1. 新浪（主力 — ETF 手动拆股 / A 股原生 qfq）
+2. 腾讯（容灾回退 — 无复权）
+3. ❌ 不再使用东方财富
 
 **返回格式统一：** DatetimeIndex + `Open/High/Low/Close/Volume` 列。
-
-### 东财源（原生支持复权）
-
-```python
-df = ak.fund_etf_hist_em(
-    symbol="510300",      # ETF 代码
     period="daily",
     start_date="20210101",
     end_date="20260101",
@@ -168,7 +163,7 @@ df = ak.stock_zh_index_daily(symbol="sz399552")   # 需 "sh"/"sz" + 代码
 # 东方财富源（含成交额）
 df = ak.stock_zh_index_daily_em(symbol="sz399552")  # 格式同上
 
-# 腾讯源（支持自定义时间范围）
+# 腾讯源（支持自定义时间范围）— 已弃用，改用新浪
 df = ak.stock_zh_index_daily_tx(symbol="sh000001", start_date="20260101", end_date="20260401")
 
 # 东财通用接口（支持周/月，含技术指标列）

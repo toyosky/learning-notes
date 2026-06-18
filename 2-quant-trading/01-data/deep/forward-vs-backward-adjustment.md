@@ -260,7 +260,7 @@ print(f"前复权收益率:  {ret_qfq:.2f}%")
 
 ```python
 # 查看 akshare 返回的复权因子
-# 东方财富接口本身不直接返回复权因子
+# akshare 接口本身不直接返回复权因子
 # 但可以通过对比 adjust="" 和 adjust="qfq" 的结果推算
 ```
 

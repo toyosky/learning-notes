@@ -17,7 +17,7 @@ OUTPUT_DIR = '/root/obsidian-vault/2-quant-trading'
 
 
 def get_data():
-    """使用 akshare（东财源）获取 510300（沪深300ETF）数据"""
+    """使用 data_fetcher 获取 510300（沪深300ETF）数据"""
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
     from data_fetcher import fetch_etf_data

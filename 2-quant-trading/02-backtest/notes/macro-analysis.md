@@ -18,16 +18,13 @@ date: 2026-06-14
 
 ## 数据获取
 
-推荐使用 akshare 东方财富源（支持前复权，无需手动处理拆股）：
+推荐使用 `data_fetcher` 统一获取（新浪源，ETF 手动拆股检测）：
 
 ```python
-import akshare as ak
+import sys; sys.path.insert(0, "../01-data/code")
+from data_fetcher import fetch_etf_data
 
-df = ak.fund_etf_hist_em(
-    symbol="510300", period="daily",
-    start_date="20210101", end_date="20260101",
-    adjust="qfq"           # 前复权自动处理拆股和分红
-)
+df = fetch_etf_data(symbol="510300", start_date="20210101", end_date="20260101")
 ```
 
 > 数据接口速查见 [[../../01-data/notes/akshare-reference|AKShare 数据接口速查]]。
