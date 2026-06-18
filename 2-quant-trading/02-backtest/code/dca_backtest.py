@@ -341,8 +341,7 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../01-data/code'))
     from data_fetcher import fetch_etf_data
     
-    # 获取数据
-    data = fetch_etf_data(symbol="510300", start_date="20210101")
+    data = fetch_etf_data(symbol="510300", start_date="20210101", end_date="20260101")
     
     # 比较策略
     comparison = compare_strategies(
