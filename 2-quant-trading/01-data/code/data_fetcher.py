@@ -57,6 +57,9 @@ def _read_cache(symbol: str, start_date: str, end_date: str) -> pd.DataFrame | N
         return None
     s = pd.to_datetime(start_date)
     e = pd.to_datetime(end_date)
+    # 缓存必须覆盖请求的起始日期，否则重新拉取
+    if df.index[0] > s:
+        return None
     clipped = df[(df.index >= s) & (df.index <= e)]
     if len(clipped) > 0:
         print(f"  [缓存] 命中 {symbol} ({len(clipped)} 条, {start_date}~{end_date})")
