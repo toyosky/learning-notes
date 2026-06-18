@@ -62,14 +62,16 @@ def plot_buy_points(data):
         ax.plot(data.index, ma_vals, color=color, linewidth=0.8,
                 alpha=0.8, label=ma_label)
 
-        # 买入点标注（每月第一个交易日）
-        ma_monthly = ma_vals.reindex(monthly_dates)
+        # 买入点标注：日线MA → resample取每月第一个交易日（与dca_ma_strategy一致）
+        data_ma = data.copy()
+        data_ma[ma_label] = ma_vals
+        mf = data_ma.resample('ME').first()
         buy_dates = []
         skip_dates = []
         for dt in monthly_dates:
-            if dt in ma_monthly.index and pd.notna(ma_monthly.loc[dt]):
-                close_val = monthly_first.loc[dt, 'Close']
-                if close_val > ma_monthly.loc[dt]:
+            ma_val = mf.loc[dt, ma_label]
+            if pd.notna(ma_val):
+                if mf.loc[dt, 'Close'] > ma_val:
                     buy_dates.append(dt)
                 else:
                     skip_dates.append(dt)
@@ -94,19 +96,19 @@ def plot_buy_points(data):
     # 第4行: 累计买入次数对比柱状图
     ax4 = axes[3]
     ma_names = ['MA10', 'MA20', 'MA60']
-    buy_counts = []
-    cum_buy = [0, 0, 0]
-    for idx, (ma_period, _) in enumerate(strategies):
-        ma_vals = data['Close'].rolling(ma_period).mean()
-        ma_monthly = ma_vals.reindex(monthly_dates)
+    cum_buy = []
+    for ma_period, _ in strategies:
+        data_ma = data.copy()
+        data_ma[f'MA{ma_period}'] = data['Close'].rolling(ma_period).mean()
+        mf = data_ma.resample('ME').first()
         count = 0
         cum = []
         for dt in monthly_dates:
-            if dt in ma_monthly.index and pd.notna(ma_monthly.loc[dt]):
-                if monthly_first.loc[dt, 'Close'] > ma_monthly.loc[dt]:
-                    count += 1
+            ma_val = mf.loc[dt, f'MA{ma_period}']
+            if pd.notna(ma_val) and mf.loc[dt, 'Close'] > ma_val:
+                count += 1
             cum.append(count)
-        cum_buy[idx] = cum
+        cum_buy.append(cum)
 
     x = range(len(monthly_dates))
     width = 0.25
@@ -326,16 +328,17 @@ def plot_price_distribution(data):
 
     for idx, (ma_period, color, label) in enumerate(strategies):
         y_val = 6.5 - idx * 0.5
-        buy_dates = []
-        for dt in monthly_dates:
-            close = monthly_first.loc[dt, 'Close']
-            if ma_period is None:
-                buy_dates.append(dt)
-            else:
-                ma_vals = data['Close'].rolling(ma_period).mean()
-                if dt in ma_vals.index and pd.notna(ma_vals.loc[dt]):
-                    if close > ma_vals.loc[dt]:
-                        buy_dates.append(dt)
+        if ma_period is None:
+            buy_dates = list(monthly_dates)
+        else:
+            data_ma = data.copy()
+            data_ma[f'MA{ma_period}'] = data['Close'].rolling(ma_period).mean()
+            mf = data_ma.resample('ME').first()
+            buy_dates = []
+            for dt in monthly_dates:
+                ma_val = mf.loc[dt, f'MA{ma_period}']
+                if pd.notna(ma_val) and mf.loc[dt, 'Close'] > ma_val:
+                    buy_dates.append(dt)
         buy_prices = [monthly_first.loc[d, 'Close'] for d in buy_dates]
         ax.scatter(buy_dates, [y_val] * len(buy_dates), marker='o', s=12,
                    color=color, alpha=0.6, label=f'{label} ({len(buy_dates)}次)')
